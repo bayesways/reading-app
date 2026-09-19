@@ -1,11 +1,11 @@
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { createAnswer } from "./model.ts";
-import { ReaderState } from "./reader.ts";
+import { ReaderState, type Answer } from "./reader.ts";
 import { ReaderView } from "./ui.ts";
 
 export default function readerExtension(pi: ExtensionAPI): void {
   let state: ReaderState | undefined;
-  let context: ExtensionContext | undefined;
+  let answer: Answer | undefined;
   let view: ReaderView | undefined;
 
   const disposeView = () => {
@@ -17,11 +17,10 @@ export default function readerExtension(pi: ExtensionAPI): void {
     view = undefined;
     state?.clear();
     state = undefined;
-    context = undefined;
+    answer = undefined;
   };
   pi.on("session_start", reset);
   pi.on("session_shutdown", reset);
-  pi.on("model_select", (_event, ctx) => { context = ctx; });
 
   pi.registerCommand("reader", {
     description: "Read an article with per-URL Q&A and learning recaps: /reader [URL]",
@@ -31,14 +30,15 @@ export default function readerExtension(pi: ExtensionAPI): void {
         return;
       }
       if (view) return;
-      context = ctx;
+      answer = createAnswer(ctx);
+      const modelLabel = ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : "No session model selected";
       state ??= new ReaderState((...params) => {
-        if (!context) throw new Error("The reader session has ended.");
-        return createAnswer(context)(...params);
+        if (!answer) throw new Error("The reader session has ended.");
+        return answer(...params);
       });
       try {
         await ctx.ui.custom<void>((tui, theme, _keybindings, done) => {
-          view = new ReaderView(state!, theme, () => tui.terminal.rows, () => tui.requestRender(), () => done());
+          view = new ReaderView(state!, theme, () => tui.terminal.rows, () => tui.requestRender(), () => done(), modelLabel);
           if (args.trim()) void view.open(args.trim());
           return view;
         }, {

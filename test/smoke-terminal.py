@@ -9,6 +9,7 @@ import shutil
 import signal
 import struct
 import subprocess
+import sys
 import tempfile
 import termios
 import threading
@@ -36,6 +37,7 @@ class Page(http.server.BaseHTTPRequestHandler):
 
 
 def main():
+    mode = "fullscreen" if "--fullscreen" in sys.argv else "regular"
     executable = shutil.which("pi")
     if not executable:
         raise RuntimeError("Install pi before running the terminal smoke test")
@@ -79,7 +81,8 @@ def main():
             proc = subprocess.Popen([
                 executable, "--offline", "--no-session", "--no-extensions", "--no-skills",
                 "--no-prompt-templates", "--no-context-files", "--no-themes", "--no-approve",
-                "--provider", "openai", "--model", "gpt-4o", "-e", str(ROOT / "src/index.ts"),
+                "--provider", "openai", "--model", "gpt-4o", "--tui-mode", mode,
+                "-e", str(ROOT / "src/index.ts"),
             ], cwd=ROOT, env=env, stdin=slave, stdout=slave, stderr=slave, start_new_session=True)
             os.close(slave)
             wait_for("gpt-4o")
@@ -89,7 +92,26 @@ def main():
             os.write(master, f"/reader http://127.0.0.1:{server.server_port}/article\r".encode())
             wait_for("Reader smoke fixture", start)
             wait_for("QUESTIONS", start)
+            wait_for("openai/gpt-4o", start)
             drain()
+            start = len(transcript)
+            os.write(master, b"vw")  # Keyboard cursor at the title, select its first word.
+            wait_for("Selected: Reader", start)
+            drain()
+            os.write(master, b"\x1b[19~")  # F8 clears without closing.
+            drain()
+            if mode == "fullscreen":
+                start = len(transcript)
+                # Drag across 'Reader' on the first article row (SGR mouse, 1-based coordinates).
+                os.write(master, b"\x1b[<0;1;5M\x1b[<32;6;5M\x1b[<0;6;5m")
+                wait_for("Selected: Reader", start)
+                drain()
+                start = len(transcript)
+                os.write(master, b"\x1b[<0;9;5M\x1b[<0;9;5m")  # Click inside 'smoke'.
+                wait_for("Selected: smoke", start)
+                drain()
+                os.write(master, b"\x1b[19~")
+                drain()
             os.write(master, b"\x1b")
             drain()
             start = len(transcript)
@@ -111,7 +133,7 @@ def main():
                         break
             assert proc.poll() == 0, f"pi did not exit cleanly: {transcript[-2000:]!r}"
             assert not list(Path(config).rglob("*.jsonl")), "Unexpected saved session"
-            print("PASS: real pi loads extension, reads article, reopens, resizes, exits; no saved session")
+            print(f"PASS ({mode}): model header, article, selection, reopen, resize, clean exit; no saved session")
     finally:
         if proc is not None and proc.poll() is None:
             proc.kill()

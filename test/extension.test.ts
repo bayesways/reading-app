@@ -23,12 +23,17 @@ test("extension opens, answers, summarizes, reopens and forgets state at session
   } as unknown as ExtensionAPI);
   let view!: ReaderView;
   let calls = 0;
+  const firstModel = { provider: "custom-provider", id: "test-model", contextWindow: 128_000, maxTokens: 8192 };
+  const nextModel = { ...firstModel, id: "next-model" };
+  let selectedModel = firstModel;
+  const requestModels: unknown[] = [];
   const ctx = {
     mode: "tui",
-    model: { id: "test-model", contextWindow: 128_000, maxTokens: 8192 },
-    modelRegistry: { complete: async () => ({
-      stopReason: "stop", content: [{ type: "text", text: ++calls === 1 ? "An explanation." : "# Learning recap\n\nYour key distinction." }],
-    }) },
+    get model() { return selectedModel; },
+    modelRegistry: { complete: async (model: unknown) => {
+      requestModels.push(model);
+      return { stopReason: "stop", content: [{ type: "text", text: ++calls === 1 ? "An explanation." : "# Learning recap\n\nYour key distinction." }] };
+    } },
     ui: { custom: (factory: (...args: unknown[]) => ReaderView) => new Promise<void>((resolve) => {
       view = factory({ terminal: { rows: 30 }, requestRender: () => {} }, theme, {}, resolve);
     }) },
@@ -36,6 +41,8 @@ test("extension opens, answers, summarizes, reopens and forgets state at session
 
   hooks.get("session_start")!();
   let pending = command("", ctx);
+  assert.match(view.render(120)[0], /custom-provider\/test-model/);
+  selectedModel = nextModel; // Even a changed context getter cannot silently switch this reader's model.
   view.state.current = {
     article: { url: "https://example.com", title: "Example", markdown: "A source about uncertainty." },
     exchanges: [], summary: "", draft: "", articleScroll: 0, chatScroll: 0, summaryScroll: 0,
@@ -44,12 +51,17 @@ test("extension opens, answers, summarizes, reopens and forgets state at session
   assert.equal(await view.state.ask("What does uncertainty mean?"), true);
   assert.equal(await view.state.ask("", "summary"), true);
   assert.equal(calls, 2);
+  assert.deepEqual(requestModels, [firstModel, firstModel]);
+  assert.match(view.render(120)[0], /custom-provider\/test-model/);
   assert.match(view.render(120).join("\n"), /Learning recap/);
   view.close();
   await pending;
 
   pending = command("", ctx);
   assert.equal(view.state.current!.exchanges.length, 1);
+  assert.match(view.render(120)[0], /custom-provider\/next-model/);
+  await view.state.ask("Another question");
+  assert.equal(requestModels[2], nextModel); // Reopening binds to the new launching model.
   const previousState = view.state;
   hooks.get("session_shutdown")!();
   await pending;

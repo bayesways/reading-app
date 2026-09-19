@@ -143,3 +143,45 @@ test("model adapter uses registry authentication and refuses silent context trun
   await assert.rejects(createAnswer(ctx)(state.current!, "Why?", "question", new AbortController().signal), /safe context budget/);
   assert.equal(captured.length, 1);
 });
+
+test("selected passages are snapshotted per question and included in recaps without leaking URLs", async () => {
+  const reply = deferred<string>();
+  const requests: Array<string | undefined> = [];
+  const state = new ReaderState(async (_reading, _question, _kind, _signal, selection) => {
+    requests.push(selection);
+    return reply.promise;
+  }, load);
+  assert.equal(await state.explainSelection(), false);
+  await state.load("https://example.com/a");
+  state.selectText("posterior");
+  const pending = state.explainSelection();
+  assert.equal(state.pendingSelection, "posterior");
+  state.selectText("likelihood"); // Change selection while the first explanation is in flight.
+  reply.resolve("A posterior is an updated distribution.");
+  await pending;
+  assert.deepEqual(requests, ["posterior"]);
+  assert.equal(state.current!.exchanges[0].selection, "posterior");
+  assert.equal(state.current!.selection, "likelihood");
+  const context = buildContext(state.current!, "Why?", "question", state.current!.selection);
+  assert.match(JSON.stringify(context), /selectedPassage.*likelihood/);
+  const recap = buildContext(state.current!, "", "summary", "unused current selection");
+  assert.match(JSON.stringify(recap), /posterior/);
+  assert.doesNotMatch(JSON.stringify(recap.messages), /unused current selection|selectedPassage/);
+  await state.load("https://example.com/b");
+  assert.equal(state.current!.selection, undefined);
+  assert.doesNotMatch(JSON.stringify(buildContext(state.current!, "Why?", "question")), /posterior|likelihood/);
+  await state.load("https://example.com/a");
+  assert.equal(state.current!.selection, "likelihood");
+  state.selectText("");
+  assert.equal(state.current!.selection, undefined);
+});
+
+test("selected-text model errors preserve the draft excerpt for retry", async () => {
+  const state = new ReaderState(async () => { throw new Error("offline"); }, load);
+  await state.load("https://example.com");
+  state.selectText("important term");
+  assert.equal(await state.explainSelection(), false);
+  assert.equal(state.current!.selection, "important term");
+  assert.equal(state.current!.exchanges.length, 0);
+  assert.equal(state.pendingSelection, undefined);
+});
