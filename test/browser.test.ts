@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import vm from "node:vm";
+import { JSDOM, VirtualConsole } from "jsdom";
 import { BrowserReader, parseReaderCommand, type BrowserSnapshot } from "../src/browser.ts";
 import { browserPage } from "../src/browser-page.ts";
 import { ReaderState } from "../src/reader.ts";
@@ -185,4 +186,120 @@ test("reader command parser makes browser mode explicit", () => {
   assert.deepEqual(parseReaderCommand("-b"), { browser: true, stopBrowser: false, url: "" });
   assert.deepEqual(parseReaderCommand("--browser-stop"), { browser: true, stopBrowser: true, url: "" });
   assert.throws(() => parseReaderCommand("--browser-stop nope"), /does not accept/);
+});
+
+function fixture(): BrowserSnapshot {
+  return {
+    model: "provider/model", status: "Article ready. Type below to ask about this page.", error: false, busy: false,
+    showingSummary: false, pages: [{ url: "https://example.com/a", title: "Annealing" }],
+    current: {
+      article: { url: "https://example.com/a", title: "Annealing", markdown: "# Annealing\n\nBody text." },
+      exchanges: [{ question: "Why?", answer: "Because.", selection: "worse moves" }],
+      summary: "",
+    },
+  };
+}
+
+/** Drives the real client script in jsdom with the pi API stubbed out. */
+async function client(snapshot = fixture()) {
+  const calls: Array<{ action: string; body?: Record<string, unknown> }> = [];
+  let hang = false;
+  const dom = new JSDOM(browserPage("test-nonce"), {
+    runScripts: "dangerously", url: "http://127.0.0.1:1/capability/", virtualConsole: new VirtualConsole(),
+    beforeParse(window) {
+      window.scrollTo = () => {};
+      (window as unknown as { fetch: unknown }).fetch = async (input: string, init?: { body?: string }) => {
+        const action = input.split("/api/")[1];
+        const body = init?.body ? JSON.parse(init.body) as Record<string, string> : undefined;
+        calls.push({ action, ...(body ? { body } : {}) });
+        if (hang && action !== "cancel") return new Promise(() => {});
+        // Mirror the server: a selection change is reflected in the snapshot it returns.
+        if (action === "select" && snapshot.current) snapshot.current.selection = body!.selection || undefined;
+        return { ok: true, json: async () => snapshot };
+      };
+    },
+  });
+  const { window } = dom;
+  const settle = async () => { for (let i = 0; i < 4; i++) await new Promise((done) => window.setTimeout(done, 0)); };
+  await settle();
+  return {
+    window, calls, settle,
+    hangNext: () => { hang = true; },
+    $: (id: string) => window.document.getElementById(id)!,
+    type: (id: string, value: string) => { (window.document.getElementById(id) as HTMLTextAreaElement).value = value; },
+    submit: async (id: string) => { (window.document.getElementById(id) as HTMLFormElement).requestSubmit(); await settle(); },
+    press: async (key: string, target?: unknown) => {
+      ((target as { dispatchEvent: (event: unknown) => void } | undefined) ?? window.document)
+        .dispatchEvent(new window.KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }));
+      await settle();
+    },
+  };
+}
+
+test("browser page renders one column with no buttons, dropdowns or status bar", async () => {
+  const page = browserPage("test-nonce");
+  assert.doesNotMatch(page, /<button|<select/i); // Every action is a keystroke or the url/ask line.
+  const ui = await client();
+  const document = ui.window.document;
+  assert.equal(ui.calls[0].action, "state");
+  assert.equal(document.querySelector("h1")?.textContent, "Annealing");
+  assert.doesNotMatch(document.querySelector("article")!.textContent!, /^Annealing\s*Annealing/); // Title is not repeated.
+  assert.match(document.getElementById("thread")!.textContent!, /Q1Why\?/);
+  assert.match(document.getElementById("thread")!.textContent!, /worse moves/);
+  assert.equal(document.getElementById("foot")!.textContent, "provider/model · in memory · 1 page");
+  assert.equal((document.getElementById("url") as HTMLInputElement).value, "https://example.com/a");
+});
+
+test("browser page asks and runs /recap and /article from the ask line", async () => {
+  const ui = await client();
+  ui.type("question", "What is annealing?");
+  await ui.submit("askForm");
+  assert.deepEqual(ui.calls.at(-1), { action: "ask", body: { question: "What is annealing?", selection: "" } });
+  assert.equal((ui.$("question") as HTMLTextAreaElement).value, "");
+
+  ui.type("question", "/recap");
+  await ui.submit("askForm");
+  assert.deepEqual(ui.calls.at(-1), { action: "summary", body: {} });
+  assert.match(ui.$("article").textContent!, /recap · type \/article/);
+
+  ui.type("question", "/article");
+  await ui.submit("askForm");
+  assert.equal(ui.calls.at(-1)!.action, "summary"); // A view switch is local; it never calls pi.
+  assert.doesNotMatch(ui.$("article").textContent!, /recap · type \/article/);
+
+  ui.type("question", "/nope");
+  await ui.submit("askForm");
+  assert.match(ui.$("foot").textContent!, /Unknown command/);
+});
+
+test("browser page loads a url, types into the ask line and unwinds with Escape", async () => {
+  const ui = await client();
+  ui.type("url", "https://example.com/b");
+  await ui.submit("loadForm");
+  assert.deepEqual(ui.calls.at(-1), { action: "load", body: { url: "https://example.com/b" } });
+
+  await ui.press("k", ui.window.document.body); // Any printable key starts a question.
+  assert.equal(ui.window.document.activeElement, ui.$("question"));
+  assert.equal((ui.$("question") as HTMLTextAreaElement).value, "k");
+
+  ui.hangNext();
+  ui.type("question", "Slow question");
+  await ui.submit("askForm");
+  assert.match(ui.$("thread").textContent!, /waiting for your model/); // The pending question is visible.
+  await ui.press("Escape");
+  assert.equal(ui.calls.at(-1)!.action, "cancel");
+  assert.doesNotMatch(ui.$("thread").textContent!, /waiting for your model/);
+});
+
+test("browser page restores an attached passage, explains it with Enter and clears it with Escape", async () => {
+  const snapshot = fixture();
+  snapshot.current!.selection = "worse moves";
+  const ui = await client(snapshot);
+  assert.equal(ui.$("quoted").hidden, false); // The attached quote is visible, not hidden state.
+  assert.match(ui.$("quotedText").textContent!, /worse moves/);
+  await ui.press("Enter");
+  assert.deepEqual(ui.calls.at(-1), { action: "explain", body: { selection: "worse moves" } });
+  await ui.press("Escape");
+  assert.deepEqual(ui.calls.at(-1), { action: "select", body: { selection: "" } });
+  assert.equal(ui.$("quoted").hidden, true);
 });

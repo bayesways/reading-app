@@ -81,7 +81,7 @@ For a one-off test without project discovery:
 pi --no-extensions -e ./src/index.ts
 ```
 
-Reading itself needs no model credentials. Questions and recaps use the configured model through pi's model registry and existing authentication. If `defaultModel` is `null`, extension mode uses the model selected by `/model`; otherwise the repo config overrides it **for reader requests only** and does not alter the main pi session. The header shows the effective `provider/model · thinking:level`. There is no fallback to another model after launch. To switch a running browser reader, use `/reader --browser-stop`, edit the config or use `/model` when inheriting, then start it again. Reader conversations remain separate from the coding session's chat history.
+Reading itself needs no model credentials. Questions and recaps use the configured model through pi's model registry and existing authentication. If `defaultModel` is `null`, extension mode uses the model selected by `/model`; otherwise the repo config overrides it **for reader requests only** and does not alter the main pi session. Both readers show the effective `provider/model · thinking:level`: the terminal header, the browser page's foot line. There is no fallback to another model after launch. To switch a running browser reader, use `/reader --browser-stop`, edit the config or use `/model` when inheriting, then start it again. Reader conversations remain separate from the coding session's chat history.
 
 ## Launch directly from the terminal
 
@@ -108,14 +108,25 @@ pi-reader [--no-open] [--config /path/to/reader.json] [URL]
 
 ## Browser reader
 
-`/reader --browser URL` serves an extracted reader-mode page—not the publisher's live site—with the article on the left and URL-scoped Q&A on the right. The browser UI provides:
+`/reader --browser URL` serves an extracted reader-mode page—not the publisher's live site—as a single 720px column: the article, then this URL's questions and answers underneath it. There is no sidebar and there are no buttons; every action is a keystroke, the URL line or the ask line.
 
-- Native mouse or keyboard text selection. Select a word or passage, then choose **Explain**, or type a custom question and choose **Ask**.
-- A persistent selected-passage preview; **Clear** stops attaching it to future questions.
-- Per-URL article switching and separate discussions.
-- **Summarize my learnings**, with Article/Recap view buttons.
-- A Cancel button for article/model requests.
-- Responsive single-column layout on narrow browser windows.
+- A bare **URL line**. Type a URL and press Enter to load it. It also lists the pages already loaded in this session, so picking one reopens its discussion.
+- Native mouse or keyboard **text selection**. Select a word or passage and press Enter to explain it, or simply start typing to ask your own question with that passage attached.
+- The **attached passage** is shown above the ask line until Esc clears it.
+- **`/recap`** in the ask line summarizes your learnings; **`/article`** returns to the page.
+- **Esc** cancels a running article or model request.
+- One grey line at the foot carries the model, `in memory`, and the number of loaded pages. While pi is working it shows request status instead, then goes back.
+
+| Key | Action |
+| --- | --- |
+| Enter in the URL line | Load that URL |
+| Enter with a selection | Explain the selected passage |
+| Any letter | Start a question with the selection attached |
+| Enter / Shift+Enter in the ask line | Send / insert a newline |
+| `/recap` · `/article` | Learning recap · back to the article |
+| Esc | Cancel a request; otherwise clear the selection; otherwise leave the recap |
+
+The page is dark only, sized for one column at any window width.
 
 The browser tab talks only to the extension's random localhost address. Closing the tab does not stop the server, so `/reader --browser` can reopen it with the current session's state. It shuts down automatically on session switch, reload, or pi exit. Use `/reader --browser-stop` to stop it immediately and erase its browser workspace.
 
@@ -209,4 +220,4 @@ python3 test/smoke-cli.py  # standalone command, config resolution, and clean sh
 
 `src/article.ts` handles extraction, `src/reader.ts` owns ephemeral per-URL state, `src/config.ts` validates repo defaults, `src/model.ts` handles model/thinking requests, `src/selection.ts` maps grapheme-safe terminal selections, `src/ui.ts` renders the terminal workspace, and `src/browser.ts`/`src/browser-page.ts` provide the loopback web workspace. `src/index.ts` connects pi commands and lifecycle hooks; `src/cli.ts` and `bin/pi-reader.mjs` provide standalone launch.
 
-Tests cover extraction, fetch limits/redirects, URL isolation, cancellation races, model/thinking configuration and context limits, lifecycle cleanup, selected-passage snapshots, terminal keyboard/mouse selection, Unicode widths, browser API authorization/CSP/input limits, standalone startup, and responsive terminal rendering. Model behavior is tested with a mocked registry, not paid provider calls.
+Tests cover extraction, fetch limits/redirects, URL isolation, cancellation races, model/thinking configuration and context limits, lifecycle cleanup, selected-passage snapshots, terminal keyboard/mouse selection, Unicode widths, browser API authorization/CSP/input limits, browser page rendering and keystrokes, standalone startup, and responsive terminal rendering. Model behavior is tested with a mocked registry, not paid provider calls.
