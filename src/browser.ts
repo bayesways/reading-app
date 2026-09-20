@@ -3,7 +3,7 @@ import { randomBytes, timingSafeEqual } from "node:crypto";
 import { spawn } from "node:child_process";
 import { cleanText } from "./article.ts";
 import { browserPage } from "./browser-page.ts";
-import { ReaderState } from "./reader.ts";
+import { ReaderState, type Reading } from "./reader.ts";
 
 const MAX_API_BYTES = 64 * 1024;
 const MAX_QUESTION_CHARS = 10_000;
@@ -15,13 +15,8 @@ export interface BrowserSnapshot {
   error: boolean;
   busy: boolean;
   showingSummary: boolean;
-  pages: Array<{ url: string; title: string }>;
-  current?: {
-    article: { url: string; title: string; markdown: string; warning?: string };
-    exchanges: Array<{ question: string; answer: string; selection?: string }>;
-    summary: string;
-    selection?: string;
-  };
+  pages: Array<Pick<Reading["article"], "url" | "title">>;
+  current?: Pick<Reading, "article" | "exchanges" | "summary" | "selection">;
 }
 
 export interface BrowserOpenResult { url: string; launched: boolean; error?: string }

@@ -309,3 +309,61 @@ test("browser page restores an attached passage, explains it with Enter and clea
   assert.deepEqual(ui.calls.at(-1), { action: "select", body: { selection: "" } });
   assert.equal(ui.$("quoted").hidden, true);
 });
+
+test("browser page only reopens a saved URL when selected from the URL list", async (t) => {
+  const snapshot = fixture();
+  snapshot.pages.push({ url: "https://example.com/b", title: "Another page" });
+  const ui = await client(snapshot);
+  t.after(() => ui.window.close());
+  const input = async (url: string, inputType: string) => {
+    ui.type("url", url);
+    ui.$("url").dispatchEvent(new ui.window.InputEvent("input", { inputType, bubbles: true }));
+    await ui.settle();
+  };
+  await input("https://example.com/b", "insertText");
+  await input("https://example.com/a", "insertReplacementText");
+  await input("https://example.com/unknown", "insertReplacementText");
+  assert.deepEqual(ui.calls.map(({ action }) => action), ["state"]);
+
+  ui.type("question", "/recap");
+  await ui.submit("askForm");
+  ui.$("url").focus();
+  await input(" https://example.com/b ", "insertReplacementText");
+  assert.deepEqual(ui.calls.at(-1), { action: "load", body: { url: "https://example.com/b" } });
+  assert.notEqual(ui.window.document.activeElement, ui.$("url"));
+  assert.doesNotMatch(ui.$("article").textContent!, /recap · type \/article/);
+});
+
+test("browser selection capture and hint accept article text and reject outside or collapsed ranges", async (t) => {
+  const ui = await client();
+  t.after(() => ui.window.close());
+  const { document } = ui.window;
+  const selection = ui.window.getSelection()!;
+  const select = async (node: Node, collapse = false) => {
+    const range = document.createRange();
+    range.selectNodeContents(node);
+    if (collapse) range.collapse(true);
+    // jsdom has no layout engine; supply the same rectangle for each real DOM range.
+    range.getClientRects = () => [{ right: 100, top: 20 }] as unknown as DOMRectList;
+    selection.removeAllRanges();
+    selection.addRange(range);
+    document.dispatchEvent(new ui.window.Event("selectionchange"));
+    ui.$("article").dispatchEvent(new ui.window.MouseEvent("mouseup", { bubbles: true }));
+    await ui.settle();
+  };
+  const paragraph = document.querySelector("article p")!;
+  paragraph.textContent = "  Body\n text.  ";
+  for (const node of [paragraph.firstChild!, paragraph]) {
+    await select(node);
+    assert.deepEqual(ui.calls.at(-1), { action: "select", body: { selection: "Body text." } });
+    assert.equal(ui.$("hint").hidden, false);
+    assert.equal(ui.$("hint").style.transform, "translate(110px,20px)");
+    assert.match(ui.$("quotedText").textContent!, /Body text\./);
+  }
+  const before = ui.calls.length;
+  await select(ui.$("thread"));
+  assert.equal(ui.$("hint").hidden, true);
+  await select(paragraph, true);
+  assert.equal(ui.$("hint").hidden, true);
+  assert.equal(ui.calls.length, before);
+});

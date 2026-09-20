@@ -106,9 +106,23 @@ async function explain(){if(!selected)return;await run('explain',{selection:sele
 async function escape(){if(state?.busy){requestId++;pending=null;state=await api('cancel',{});flashStatus();render();return}
 if(selected){selected='';$('hint').hidden=true;getSelection()?.removeAllRanges();state=await api('select',{selection:''});render();return}
 if(mode==='summary'){mode='article';render()}}
-$('loadForm').addEventListener('submit',event=>{event.preventDefault();const url=$('url').value.trim();if(!url)return;selected='';mode='article';$('url').blur();run('load',{url})});
+function loadArticle(url){
+  selected='';
+  mode='article';
+  $('url').blur();
+  run('load',{url});
+}
+$('loadForm').addEventListener('submit',event=>{
+  event.preventDefault();
+  const url=$('url').value.trim();
+  if(url)loadArticle(url);
+});
 // Picking a loaded page from the url line's list reopens its discussion immediately.
-$('url').addEventListener('input',event=>{if(event.inputType!=='insertReplacementText')return;const url=$('url').value.trim();if(state?.pages.some(page=>page.url===url)&&url!==state.current?.article.url){selected='';mode='article';$('url').blur();run('load',{url})}});
+$('url').addEventListener('input',event=>{
+  if(event.inputType!=='insertReplacementText')return;
+  const url=$('url').value.trim();
+  if(state?.pages.some(page=>page.url===url)&&url!==state.current?.article.url)loadArticle(url);
+});
 $('askForm').addEventListener('submit',event=>{event.preventDefault();const value=$('question').value.trim();if(!value)return;
 const command=value.toLowerCase();
 if(command==='/recap'||command==='/summary'||command==='/summarize'){$('question').value='';grow();mode='summary';run('summary',{});return}
@@ -117,8 +131,30 @@ if(command.charAt(0)==='/'){state={...state,error:true,status:'Unknown command. 
 run('ask',{question:value,selection:selected},{question:value,selection:selected}).then(sent=>{if(sent){$('question').value='';grow()}})});
 $('question').addEventListener('input',grow);
 $('question').addEventListener('keydown',event=>{if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();$('askForm').requestSubmit()}});
-function captureSelection(){const selection=getSelection();if(!selection||selection.isCollapsed)return;const range=selection.getRangeAt(0);const node=range.commonAncestorContainer.nodeType===1?range.commonAncestorContainer:range.commonAncestorContainer.parentElement;if(!$('article').contains(node))return;const text=selection.toString().replace(/\s+/g,' ').trim().slice(0,20000);if(!text)return;selected=text;showQuote();api('select',{selection:selected}).catch(fail)}
-function placeHint(){const hint=$('hint');const selection=getSelection();if(!selection||selection.isCollapsed||!selection.rangeCount){hint.hidden=true;return}const range=selection.getRangeAt(0);const node=range.commonAncestorContainer.nodeType===1?range.commonAncestorContainer:range.commonAncestorContainer.parentElement;const rects=range.getClientRects();const rect=rects[rects.length-1];if(!$('article').contains(node)||!rect){hint.hidden=true;return}hint.hidden=false;hint.style.transform='translate('+Math.round(Math.max(4,Math.min(rect.right+10,innerWidth-96)))+'px,'+Math.round(Math.max(4,rect.top))+'px)'}
+function articleSelection(){
+  const selection=getSelection();
+  if(!selection||selection.isCollapsed||!selection.rangeCount)return;
+  const range=selection.getRangeAt(0);
+  if(!$('article').contains(range.commonAncestorContainer))return;
+  return {selection,range};
+}
+function captureSelection(){
+  const current=articleSelection();
+  if(!current)return;
+  const text=current.selection.toString().replace(/\s+/g,' ').trim().slice(0,20000);
+  if(!text)return;
+  selected=text;
+  showQuote();
+  api('select',{selection:selected}).catch(fail);
+}
+function placeHint(){
+  const hint=$('hint');
+  const current=articleSelection();
+  const rects=current?.range.getClientRects();
+  const rect=rects?.[rects.length-1];
+  hint.hidden=!rect;
+  if(rect)hint.style.transform='translate('+Math.round(Math.max(4,Math.min(rect.right+10,innerWidth-96)))+'px,'+Math.round(Math.max(4,rect.top))+'px)';
+}
 $('article').addEventListener('mouseup',captureSelection);$('article').addEventListener('keyup',captureSelection);
 document.addEventListener('selectionchange',placeHint);addEventListener('scroll',placeHint,{passive:true});addEventListener('resize',placeHint);addEventListener('resize',dockSpace);
 // Every remaining action is a keystroke: enter explains a selection, esc unwinds, any letter starts a question.

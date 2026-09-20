@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { test } from "node:test";
 import type { ExtensionAPI, ExtensionCommandContext, Theme } from "@earendil-works/pi-coding-agent";
 import readerExtension from "../src/index.ts";
@@ -11,6 +14,17 @@ const theme = {
 } as unknown as Theme;
 
 test("extension opens, answers, summarizes, reopens and forgets state at session boundaries", async (t) => {
+  // Exercise the stubbed session model regardless of the user's reader configuration.
+  const directory = await mkdtemp(join(tmpdir(), "pi-reader-extension-"));
+  const previousConfig = process.env.PI_READER_CONFIG;
+  t.after(async () => {
+    if (previousConfig === undefined) delete process.env.PI_READER_CONFIG;
+    else process.env.PI_READER_CONFIG = previousConfig;
+    await rm(directory, { recursive: true, force: true });
+  });
+  const configPath = join(directory, "reader.json");
+  await writeFile(configPath, JSON.stringify({ defaultModel: null, defaultThinkingLevel: "medium" }));
+  process.env.PI_READER_CONFIG = configPath;
   const hooks = new Map<string, () => void>();
   let command!: (args: string, ctx: ExtensionCommandContext) => Promise<void>;
   // No session mutation APIs: this test fails if the extension tries to persist a message/entry.
