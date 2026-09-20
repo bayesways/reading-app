@@ -72,7 +72,7 @@ Use `--no-open` to print the local URL without opening a browser, and `--config 
 
 ### Browser
 
-Select text in the article, then choose **Explain** or **Ask**. Use **Summarize my learnings** for a recap of the article and the page's completed Q&A. The sidebar keeps separate discussions for each URL.
+Select text in the article and an **↵ explain** button appears beside it: click it, or press `Enter`, to ask for an explanation of that passage. The passage stays attached to your next question until `Esc` clears it. Type in the ask line at the bottom to ask anything, `/recap` for a recap of the article and its completed Q&A, and `/article` to return to the page. Paste a URL in the top line to load a page; each URL keeps its own discussion.
 
 ### Terminal
 

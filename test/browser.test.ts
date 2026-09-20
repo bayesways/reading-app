@@ -221,7 +221,7 @@ async function client(t: TestContext, snapshot = fixture()) {
         }
         if (hang && action !== "cancel") return new Promise(() => {});
         // Mirror the server: a selection change is reflected in the snapshot it returns.
-        if (action === "select" && snapshot.current) snapshot.current.selection = body!.selection || undefined;
+        if ((action === "select" || action === "explain") && snapshot.current) snapshot.current.selection = body!.selection || undefined;
         return { ok: true, json: async () => snapshot };
       };
     },
@@ -250,10 +250,11 @@ async function client(t: TestContext, snapshot = fixture()) {
   };
 }
 
-test("browser page renders one column with no buttons, dropdowns or status bar", async (t) => {
+test("browser page renders one column with no dropdowns or status bar", async (t) => {
   const page = browserPage("test-nonce");
-  assert.doesNotMatch(page, /<button|<select/i); // Every action is a keystroke or the url/ask line.
+  assert.doesNotMatch(page, /<select/i); // Every other action is a keystroke or the url/ask line.
   const ui = await client(t);
+  assert.deepEqual([...ui.window.document.querySelectorAll("button")].map((node) => node.id), ["hint"]);
   const document = ui.window.document;
   assert.equal(ui.calls[0].action, "state");
   assert.equal(document.querySelector("h1")?.textContent, "Annealing");
@@ -320,6 +321,38 @@ test("browser page restores an attached passage, explains it with Enter and clea
   await ui.press("Enter");
   assert.deepEqual(ui.calls.at(-1), { action: "explain", body: { selection: "worse moves" } });
   await ui.press("Escape");
+  assert.deepEqual(ui.calls.at(-1), { action: "select", body: { selection: "" } });
+  assert.equal(ui.$("quoted").hidden, true);
+});
+
+test("the explain hint is a button that explains the live selection on click", async (t) => {
+  const ui = await client(t);
+  const { document } = ui.window;
+  const paragraph = document.querySelector("article p")!;
+  paragraph.textContent = "  worse  moves ";
+  const range = document.createRange();
+  range.selectNodeContents(paragraph);
+  range.getClientRects = () => [{ right: 100, top: 20 }] as unknown as DOMRectList;
+  const selection = ui.window.getSelection()!;
+  selection.removeAllRanges();
+  selection.addRange(range);
+  document.dispatchEvent(new ui.window.Event("selectionchange"));
+  await ui.settle();
+  assert.equal(ui.$("hint").hidden, false);
+
+  const sent = ui.calls.length;
+  // The press that starts the click is cancelled, or it would collapse the selection being explained.
+  const press = new ui.window.MouseEvent("mousedown", { bubbles: true, cancelable: true });
+  ui.$("hint").dispatchEvent(press);
+  assert.equal(press.defaultPrevented, true);
+  ui.$("hint").dispatchEvent(new ui.window.MouseEvent("click", { bubbles: true, cancelable: true }));
+  await ui.settle();
+  // One request: the click attaches the passage and asks for the explanation in the same call.
+  assert.deepEqual(ui.calls.slice(sent), [{ action: "explain", body: { selection: "worse moves" } }]);
+  assert.equal(ui.$("quoted").hidden, false);
+  assert.match(ui.$("quotedText").textContent!, /worse moves/);
+
+  await ui.press("Escape"); // The passage stays attached until it is cleared, as after Enter.
   assert.deepEqual(ui.calls.at(-1), { action: "select", body: { selection: "" } });
   assert.equal(ui.$("quoted").hidden, true);
 });

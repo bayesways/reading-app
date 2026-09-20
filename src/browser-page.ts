@@ -45,7 +45,8 @@ article hr{border:0;border-top:1px solid var(--line);margin:2em 0}
 .foot{margin-top:12px;font:.74rem/1.6 var(--mono);color:var(--faint)}.foot.error{color:var(--danger)}.foot.busy{animation:pulse 1.2s ease-in-out infinite alternate}
 @keyframes pulse{to{opacity:.45}}
 /* follows the live selection; the only action affordance on the page. */
-.hint{position:fixed;top:0;left:0;z-index:2;font:.72rem var(--mono);color:var(--accent);background:var(--bg);border:1px solid var(--line);border-radius:4px;padding:2px 7px;pointer-events:none;white-space:nowrap}
+.hint{position:fixed;top:0;left:0;z-index:2;appearance:none;font:.72rem var(--mono);color:var(--accent);background:var(--bg);border:1px solid var(--line);border-radius:4px;padding:2px 7px;white-space:nowrap;cursor:pointer}
+.hint:hover,.hint:focus-visible{color:var(--bright);border-color:var(--accent);outline:none}
 ::selection{background:rgba(168,209,168,.22)}
 @media(max-width:600px){.col{padding:28px 16px 24px}.bar{padding:12px 16px 14px}h1{font-size:1.7rem}}
 </style>
@@ -59,7 +60,7 @@ article hr{border:0;border-top:1px solid var(--line);margin:2em 0}
 <div class="dock" id="dock"><div class="bar"><div class="ask"><span class="caret">&rsaquo;</span><form id="askForm"><div class="quoted" id="quoted" hidden><span class="text" id="quotedText"></span><span class="esc">esc clears</span></div><textarea id="question" rows="1" placeholder="ask, or /recap" aria-label="Ask about this article"></textarea></form></div>
 <div class="foot" id="foot">Connecting to pi…</div>
 </div></div>
-<span class="hint" id="hint" hidden>&crarr; explain</span>
+<button class="hint" id="hint" type="button" hidden aria-label="Explain the selected passage">&crarr; explain</button>
 <script nonce="${nonce}">
 'use strict';
 const base=location.pathname.endsWith('/')?location.pathname:location.pathname+'/';
@@ -103,7 +104,7 @@ const result=await api(action,payload);
 if(id===requestId){pending=null;state=result;selected=state.current?.selection||'';render();flashStatus();if(item)toBottom()}
 return !result.error}
 catch(error){if(id===requestId){pending=null;fail(error)}return false}}
-async function explain(){if(!selected)return;await run('explain',{selection:selected},{question:'Explain this passage.',selection:selected})}
+async function explain(){const live=selectionText();if(live){selected=live;showQuote()}if(!selected)return;await run('explain',{selection:selected},{question:'Explain this passage.',selection:selected})}
 async function escape(){if(state?.busy){requestId++;pending=null;loading=null;state=await api('cancel',{});flashStatus();render();return}
 if(selected){selected='';$('hint').hidden=true;getSelection()?.removeAllRanges();state=await api('select',{selection:''});render();return}
 if(mode==='summary'){mode='article';render()}}
@@ -145,10 +146,12 @@ function articleSelection(){
   if(!$('article').contains(range.commonAncestorContainer))return;
   return {selection,range};
 }
-function captureSelection(){
+function selectionText(){
   const current=articleSelection();
-  if(!current)return;
-  const text=current.selection.toString().replace(/\s+/g,' ').trim().slice(0,20000);
+  return current?current.selection.toString().replace(/\s+/g,' ').trim().slice(0,20000):'';
+}
+function captureSelection(){
+  const text=selectionText();
   if(!text)return;
   selected=text;
   showQuote();
@@ -163,8 +166,11 @@ function placeHint(){
   if(rect)hint.style.transform='translate('+Math.round(Math.max(4,Math.min(rect.right+10,innerWidth-96)))+'px,'+Math.round(Math.max(4,rect.top))+'px)';
 }
 $('article').addEventListener('mouseup',captureSelection);$('article').addEventListener('keyup',captureSelection);
+// The hint is a button: pressing it must not collapse the selection it is about to explain.
+$('hint').addEventListener('mousedown',event=>event.preventDefault());
+$('hint').addEventListener('click',()=>{explain().catch(fail)});
 document.addEventListener('selectionchange',placeHint);addEventListener('scroll',placeHint,{passive:true});addEventListener('resize',placeHint);addEventListener('resize',dockSpace);
-// Every remaining action is a keystroke: enter explains a selection, esc unwinds, any letter starts a question.
+// Apart from the hint, every action is a keystroke: enter explains a selection, esc unwinds, any letter starts a question.
 addEventListener('keydown',event=>{const typing=event.target===$('question')||event.target===$('url');
 if(event.key==='Escape'){event.preventDefault();escape().catch(fail);return}
 if(typing||event.metaKey||event.ctrlKey||event.altKey)return;
