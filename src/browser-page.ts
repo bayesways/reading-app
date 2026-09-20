@@ -7,35 +7,128 @@ export function browserPage(nonce: string): string {
 <meta name="referrer" content="no-referrer">
 <title>Pi Reader</title>
 <style nonce="${nonce}">
-:root{color-scheme:light dark;--bg:#f7f5ef;--panel:#fff;--text:#24231f;--muted:#706d64;--line:#d9d4c8;--accent:#7357c7;--selected:#fff1a8;--danger:#b33a3a} @media(prefers-color-scheme:dark){:root{--bg:#171713;--panel:#22221d;--text:#e9e6dc;--muted:#aaa69b;--line:#3d3c34;--accent:#b5a0ff;--selected:#5b501e;--danger:#ff8c8c}}
-*{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--text);font:16px/1.6 ui-sans-serif,system-ui,-apple-system,sans-serif} button,input,select,textarea{font:inherit;color:inherit} button{border:1px solid var(--line);background:var(--panel);border-radius:.45rem;padding:.42rem .7rem;cursor:pointer} button:hover{border-color:var(--accent)} button:disabled{opacity:.55;cursor:not-allowed}.primary{background:var(--accent);color:white;border-color:var(--accent)}
-header{position:sticky;top:0;z-index:4;background:color-mix(in srgb,var(--bg) 94%,transparent);backdrop-filter:blur(8px);border-bottom:1px solid var(--line);padding:.7rem 1rem}.brand{display:flex;gap:.7rem;align-items:baseline;margin-bottom:.55rem}.brand strong{color:var(--accent);letter-spacing:.06em}.model{color:var(--muted);font-size:.85rem}.urlbar{display:flex;gap:.5rem}.urlbar input{flex:1;min-width:0;background:var(--panel);border:1px solid var(--line);border-radius:.45rem;padding:.5rem .65rem}
-main{display:grid;grid-template-columns:minmax(0,1fr) minmax(20rem,34rem);height:calc(100vh - 106px)}.reading,.side{overflow:auto}.reading{padding:2.2rem clamp(1.2rem,5vw,5rem);border-right:1px solid var(--line)}article{max-width:48rem;margin:auto;font-family:ui-serif,Georgia,serif;font-size:1.08rem}article h1{font-size:2.15rem;line-height:1.15}article h2{margin-top:2.2rem}article pre,.message pre{overflow:auto;background:var(--bg);padding:1rem;border-radius:.4rem}article code,.message code{font-family:ui-monospace,monospace}article a,.message a{color:var(--accent)} blockquote{border-left:3px solid var(--accent);margin-left:0;padding-left:1rem;color:var(--muted)}
-.side{display:flex;flex-direction:column;background:var(--panel)}.sidehead{padding:.8rem 1rem;border-bottom:1px solid var(--line);display:flex;gap:.5rem;align-items:center}.sidehead select{min-width:0;flex:1;background:var(--bg);border:1px solid var(--line);padding:.4rem}.messages{padding:1rem;flex:1;overflow:auto}.message{padding-bottom:1rem;margin-bottom:1rem;border-bottom:1px solid var(--line)}.message h3{font-size:1rem;margin:.2rem 0}.quote{white-space:pre-wrap;border-left:3px solid var(--accent);padding:.45rem .7rem;background:var(--bg);font-size:.9rem;color:var(--muted);max-height:10rem;overflow:auto}.selection{padding:.7rem 1rem;border-top:1px solid var(--line);background:var(--bg)}.selection p{white-space:pre-wrap;max-height:7rem;overflow:auto;margin:.4rem 0}.actions{display:flex;gap:.4rem;flex-wrap:wrap}.ask{padding:.7rem 1rem;border-top:1px solid var(--line)}textarea{width:100%;resize:vertical;min-height:4.5rem;background:var(--bg);border:1px solid var(--line);border-radius:.45rem;padding:.55rem}.askrow{display:flex;justify-content:space-between;gap:.5rem;margin-top:.45rem}.status{font-size:.88rem;color:var(--muted);padding:.45rem 1rem;border-top:1px solid var(--line)}.status.error{color:var(--danger)}.empty{color:var(--muted);text-align:center;margin-top:18vh}.busy{animation:pulse 1.2s infinite alternate}@keyframes pulse{to{opacity:.55}}
-@media(max-width:850px){main{display:block;height:auto}.reading{border:0;min-height:70vh}.side{min-height:80vh;border-top:1px solid var(--line)}}
+:root{color-scheme:dark;--bg:#121212;--text:#e0e0e0;--bright:#fff;--muted:#a0a0a0;--faint:#5e5a52;--line:#333;--accent:#a8d1a8;--danger:#e39191;--mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+*{box-sizing:border-box}[hidden]{display:none !important}
+body{margin:0;background:var(--bg);color:var(--text);font:16px/1.7 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased}
+.col{max-width:720px;margin:0 auto;padding:40px 20px 28px}
+input,textarea{font:inherit;line-height:inherit;color:inherit;background:none;border:0;padding:0;margin:0;width:100%;resize:none;outline:none}
+input::placeholder,textarea::placeholder{color:var(--faint)}
+/* the only chrome: a wordmark and a bare url line. enter loads, no button. */
+.top{display:flex;align-items:baseline;gap:16px;border-bottom:1px solid var(--line);padding-bottom:14px;margin-bottom:44px}
+.mark{flex:none;font-size:.95rem;font-weight:600;letter-spacing:-.3px}
+.top form{flex:1;min-width:0}#url{font:.82rem/1.7 var(--mono);color:var(--muted);text-overflow:ellipsis}#url:focus{color:var(--text)}
+h1{font-size:2.1rem;font-weight:600;color:var(--bright);letter-spacing:-.5px;line-height:1.25;margin:0 0 1.1rem}
+.label{font:.78rem/1.7 var(--mono);color:var(--faint);margin:-.6rem 0 1.6rem}.label.recap{color:var(--accent)}
+article h2,article h3,article h4{font-weight:600;color:var(--bright);letter-spacing:-.3px;margin:2em 0 .5em}article h2{font-size:1.5rem}article h3{font-size:1.2rem}article h4{font-size:1.05rem}
+article p,.ex p,.ex li{margin:0 0 1.5em}article ul,article ol,.ex ul,.ex ol{padding-left:1.3em;margin:0 0 1.5em}article li,.ex li{margin:0 0 .4em}
+article a,.ex a{color:var(--accent);text-decoration:none}article a:hover,.ex a:hover{color:var(--bright);text-decoration:underline}
+article pre,.ex pre{background:#1e1e1e;border:1px solid var(--line);border-radius:8px;padding:16px;overflow:auto;margin:0 0 1.5em}
+article code,.ex code{font:.9em var(--mono);background:#2a2a2a;padding:2px 6px;border-radius:4px}article pre code,.ex pre code{background:none;padding:0}
+article blockquote{border-left:4px solid var(--accent);margin:0 0 1.5em;padding-left:20px;color:var(--muted);font-style:italic}
+article hr{border:0;border-top:1px solid var(--line);margin:2em 0}
+/* the discussion sits under the article in the same column. no sidebar, no divider. */
+.thread{border-top:1px solid var(--line);margin-top:36px;padding-top:26px}
+.ex{margin-bottom:28px}.ex:last-child{margin-bottom:0}
+.ex .q{font-weight:600;color:var(--bright);margin:0 0 .7em}
+.ex .n{font:500 .8rem var(--mono);color:var(--accent);margin-right:.6em}
+.ex blockquote{border-left:4px solid var(--accent);margin:0 0 1em;padding-left:18px;color:var(--muted);font-style:italic}
+.ex.waiting{color:var(--faint)}.ex.waiting .q{color:var(--muted)}
+/* the ask line and its foot stay docked; the article scrolls under them. */
+.dock{position:fixed;left:0;right:0;bottom:0;z-index:3;background:var(--bg);border-top:1px solid var(--line)}
+.dock::before{content:"";position:absolute;left:0;right:0;bottom:100%;height:36px;background:linear-gradient(to top,var(--bg),transparent);pointer-events:none}
+.bar{max-width:720px;margin:0 auto;padding:16px 20px 18px}
+.ask{display:flex;align-items:baseline;gap:10px}
+.ask .caret{flex:none;color:var(--accent)}.ask form{flex:1;min-width:0}#question{max-height:40vh;overflow:auto}
+.quoted{display:flex;gap:10px;font-size:.9rem;color:var(--accent);margin-bottom:.6rem}
+.quoted .text{flex:1;min-width:0;font-style:italic;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.quoted .esc{flex:none;font:.74rem var(--mono);color:var(--faint)}
+.foot{margin-top:12px;font:.74rem/1.6 var(--mono);color:var(--faint)}.foot.error{color:var(--danger)}.foot.busy{animation:pulse 1.2s ease-in-out infinite alternate}
+@keyframes pulse{to{opacity:.45}}
+/* follows the live selection; the only action affordance on the page. */
+.hint{position:fixed;top:0;left:0;z-index:2;font:.72rem var(--mono);color:var(--accent);background:var(--bg);border:1px solid var(--line);border-radius:4px;padding:2px 7px;pointer-events:none;white-space:nowrap}
+::selection{background:rgba(168,209,168,.22)}
+@media(max-width:600px){.col{padding:28px 16px 24px}.bar{padding:12px 16px 14px}h1{font-size:1.7rem}}
 </style>
 </head>
 <body>
-<header><div class="brand"><strong>π READER</strong><span class="model" id="model"></span><span class="model">in memory only</span></div><form class="urlbar" id="loadForm"><input id="url" type="url" inputmode="url" placeholder="https://example.com/article" aria-label="Article URL"><button class="primary">Load</button></form></header>
-<main><section class="reading"><article id="article"><p class="empty">Load an article to begin.</p></article></section><aside class="side"><div class="sidehead"><select id="pages" aria-label="Loaded pages"><option>No loaded pages</option></select><button id="articleMode">Article</button><button id="summaryMode">Recap</button></div><div class="messages" id="messages"><p class="empty">Questions and answers stay scoped to this URL.</p></div><section class="selection" id="selection" hidden><strong>Selected passage</strong><p id="selectedText"></p><div class="actions"><button class="primary" id="explain">Explain</button><button id="focusAsk">Ask</button><button id="clearSelection">Clear</button></div></section><form class="ask" id="askForm"><textarea id="question" placeholder="Ask about this article…"></textarea><div class="askrow"><button type="button" id="summarize">Summarize my learnings</button><span><button type="button" id="cancel" hidden>Cancel</button> <button class="primary" id="askButton">Ask</button></span></div></form><div class="status" id="status">Connecting to pi…</div></aside></main>
+<div class="col">
+<div class="top"><span class="mark">reader</span><form id="loadForm"><input id="url" type="url" inputmode="url" list="pages" spellcheck="false" placeholder="paste a url, then press enter" aria-label="Article URL"></form><datalist id="pages"></datalist></div>
+<article id="article"></article>
+<section class="thread" id="thread" hidden></section>
+</div>
+<div class="dock" id="dock"><div class="bar"><div class="ask"><span class="caret">&rsaquo;</span><form id="askForm"><div class="quoted" id="quoted" hidden><span class="text" id="quotedText"></span><span class="esc">esc clears</span></div><textarea id="question" rows="1" placeholder="ask, or /recap" aria-label="Ask about this article"></textarea></form></div>
+<div class="foot" id="foot">Connecting to pi…</div>
+</div></div>
+<span class="hint" id="hint" hidden>&crarr; explain</span>
 <script nonce="${nonce}">
 'use strict';
 const base=location.pathname.endsWith('/')?location.pathname:location.pathname+'/';
-const $=id=>document.getElementById(id); let state; let selected=''; let mode='article'; let requestId=0;
+const $=id=>document.getElementById(id); let state; let selected=''; let mode='article'; let requestId=0; let pending=null; let flash=0; let flashTimer=0;
 const safeUrl=value=>{try{const u=new URL(value);return u.protocol==='http:'||u.protocol==='https:'?u.href:null}catch{return null}};
 function inline(parent,text){const re=/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)|\x60([^\x60]+)\x60|\*\*([^*]+)\*\*|\*([^*]+)\*/g;let at=0,m;while((m=re.exec(text))){parent.append(document.createTextNode(text.slice(at,m.index)));let node;if(m[1]){node=document.createElement('a');node.textContent=m[1];node.href=safeUrl(m[2])||'#';node.target='_blank';node.rel='noopener noreferrer'}else if(m[3]){node=document.createElement('code');node.textContent=m[3]}else{node=document.createElement(m[4]?'strong':'em');node.textContent=m[4]||m[5]}parent.append(node);at=re.lastIndex}parent.append(document.createTextNode(text.slice(at)))}
-function markdown(text,root){root.replaceChildren();const lines=(text||'').split('\n');let i=0;while(i<lines.length){const line=lines[i];if(!line.trim()){i++;continue}if(/^\x60\x60\x60/.test(line)){const code=[];i++;while(i<lines.length&&!/^\x60\x60\x60/.test(lines[i]))code.push(lines[i++]);i++;const pre=document.createElement('pre'),c=document.createElement('code');c.textContent=code.join('\n');pre.append(c);root.append(pre);continue}const heading=line.match(/^(#{1,6})\s+(.+)/);if(heading){const h=document.createElement('h'+heading[1].length);inline(h,heading[2]);root.append(h);i++;continue}if(/^([-*_])(?:\s*\1){2,}\s*$/.test(line)){root.append(document.createElement('hr'));i++;continue}if(/^>\s?/.test(line)){const q=document.createElement('blockquote'),parts=[];while(i<lines.length&&/^>\s?/.test(lines[i]))parts.push(lines[i++].replace(/^>\s?/,''));inline(q,parts.join('\n'));root.append(q);continue}const list=line.match(/^\s*(?:([-+*])|(\d+)\.)\s+(.+)/);if(list){const tag=list[2]?'ol':'ul',el=document.createElement(tag);while(i<lines.length){const item=lines[i].match(/^\s*(?:([-+*])|(\d+)\.)\s+(.+)/);if(!item||Boolean(item[2])!==Boolean(list[2]))break;const li=document.createElement('li');inline(li,item[3]);el.append(li);i++}root.append(el);continue}const parts=[line];i++;while(i<lines.length&&lines[i].trim()&&!/^(#{1,6})\s|^\x60\x60\x60|^>\s?|^\s*(?:[-+*]|\d+\.)\s+/.test(lines[i]))parts.push(lines[i++]);const p=document.createElement('p');inline(p,parts.join(' '));root.append(p)}}
+function markdown(text,root){root.replaceChildren();const lines=(text||'').split('\n');let i=0;while(i<lines.length){const line=lines[i];if(!line.trim()){i++;continue}if(/^\x60\x60\x60/.test(line)){const code=[];i++;while(i<lines.length&&!/^\x60\x60\x60/.test(lines[i]))code.push(lines[i++]);i++;const pre=document.createElement('pre'),c=document.createElement('code');c.textContent=code.join('\n');pre.append(c);root.append(pre);continue}const heading=line.match(/^(#{1,6})\s+(.+)/);if(heading){const h=document.createElement('h'+Math.min(heading[1].length+1,6));inline(h,heading[2]);root.append(h);i++;continue}if(/^([-*_])(?:\s*\1){2,}\s*$/.test(line)){root.append(document.createElement('hr'));i++;continue}if(/^>\s?/.test(line)){const q=document.createElement('blockquote'),parts=[];while(i<lines.length&&/^>\s?/.test(lines[i]))parts.push(lines[i++].replace(/^>\s?/,''));inline(q,parts.join('\n'));root.append(q);continue}const list=line.match(/^\s*(?:([-+*])|(\d+)\.)\s+(.+)/);if(list){const tag=list[2]?'ol':'ul',el=document.createElement(tag);while(i<lines.length){const item=lines[i].match(/^\s*(?:([-+*])|(\d+)\.)\s+(.+)/);if(!item||Boolean(item[2])!==Boolean(list[2]))break;const li=document.createElement('li');inline(li,item[3]);el.append(li);i++}root.append(el);continue}const parts=[line];i++;while(i<lines.length&&lines[i].trim()&&!/^(#{1,6})\s|^\x60\x60\x60|^>\s?|^\s*(?:[-+*]|\d+\.)\s+/.test(lines[i]))parts.push(lines[i++]);const p=document.createElement('p');inline(p,parts.join(' '));root.append(p)}}
 async function api(action='',payload,method=payload?'POST':'GET'){const options={method,headers:{'Accept':'application/json'}};if(payload!==undefined){options.headers['Content-Type']='application/json';options.body=JSON.stringify(payload)}const response=await fetch(base+'api/'+action,options);const data=await response.json().catch(()=>({error:'Invalid response from pi.'}));if(!response.ok)throw new Error(data.error||('Request failed: '+response.status));return data}
-function render(){if(!state)return;$('model').textContent=state.model+' ·';$('status').textContent=state.status;$('status').className='status'+(state.error?' error':'')+(state.busy?' busy':'');$('cancel').hidden=!state.busy;for(const el of document.querySelectorAll('button,input,textarea,select'))if(el.id!=='cancel')el.disabled=state.busy;const current=state.current;if(current&&document.activeElement!==$('url'))$('url').value=current.article.url;const pages=$('pages');pages.replaceChildren();if(state.pages.length){for(const page of state.pages){const option=document.createElement('option');option.value=page.url;option.textContent=page.title;option.selected=current&&page.url===current.article.url;pages.append(option)}}else{const option=document.createElement('option');option.textContent='No loaded pages';pages.append(option)}const article=$('article');if(current){markdown(mode==='summary'?(current.summary||'*No recap yet. Choose Summarize my learnings.*'):current.article.markdown,article)}else{article.replaceChildren();const empty=document.createElement('p');empty.className='empty';empty.textContent='Load an article to begin.';article.append(empty)}const messages=$('messages');messages.replaceChildren();if(current&&current.exchanges.length){current.exchanges.forEach((exchange,index)=>{const box=document.createElement('section');box.className='message';const h=document.createElement('h3');h.textContent='Q'+(index+1)+': '+exchange.question;box.append(h);if(exchange.selection){const q=document.createElement('div');q.className='quote';q.textContent=exchange.selection;box.append(q)}const answer=document.createElement('div');markdown(exchange.answer,answer);box.append(answer);messages.append(box)})}else{const p=document.createElement('p');p.className='empty';p.textContent='Ask a question about this article.';messages.append(p)}if(current&&current.selection&&!selected)selected=current.selection;showSelection();$('articleMode').disabled=mode==='article'||state.busy;$('summaryMode').disabled=mode==='summary'||state.busy||!current?.summary}
-function showSelection(){const box=$('selection');box.hidden=!selected;$('selectedText').textContent=selected}
-async function refresh(){state=await api('state');render()}
-async function run(action,payload){const id=++requestId;try{state={...state,busy:true,status:action==='summary'?'Summarizing…':action==='load'?'Loading article…':'Asking pi…'};render();const result=await api(action,payload);if(id===requestId){state=result;selected=state.current?.selection||'';render();$('messages').scrollTop=$('messages').scrollHeight}return !result.error}catch(error){if(id===requestId){state={...state,busy:false,error:true,status:error.message};render()}return false}}
-$('loadForm').addEventListener('submit',event=>{event.preventDefault();selected='';mode='article';run('load',{url:$('url').value})});
-$('askForm').addEventListener('submit',async event=>{event.preventDefault();const question=$('question').value.trim();if(question&&await run('ask',{question,selection:selected}))$('question').value=''});
-$('explain').onclick=()=>run('explain',{selection:selected});$('focusAsk').onclick=()=>{$('question').focus()};$('clearSelection').onclick=async()=>{selected='';showSelection();state=await api('select',{selection:''});render()};$('summarize').onclick=()=>{mode='summary';run('summary',{})};$('cancel').onclick=async()=>{requestId++;state=await api('cancel',{});render()};$('articleMode').onclick=()=>{mode='article';render()};$('summaryMode').onclick=()=>{mode='summary';render()};$('pages').onchange=()=>{selected='';mode='article';run('load',{url:$('pages').value})};
-function captureSelection(){const selection=getSelection();if(!selection||selection.isCollapsed)return;const range=selection.getRangeAt(0);const node=range.commonAncestorContainer.nodeType===1?range.commonAncestorContainer:range.commonAncestorContainer.parentElement;if(!$('article').contains(node))return;selected=selection.toString().replace(/\s+/g,' ').trim().slice(0,20000);showSelection();api('select',{selection:selected}).catch(error=>{$('status').textContent=error.message;$('status').className='status error'})}
-$('article').addEventListener('mouseup',captureSelection);$('article').addEventListener('keyup',captureSelection);$('question').addEventListener('keydown',event=>{if((event.metaKey||event.ctrlKey)&&event.key==='Enter')$('askForm').requestSubmit()});
-refresh().catch(error=>{$('status').textContent=error.message;$('status').className='status error'});
+function fail(error){state={...state,busy:false,error:true,status:error.message};flashStatus();render()}
+// The title is rendered as the page's own heading; drop it from the body to avoid a duplicate.
+function withoutTitle(text,title){const m=(text||'').match(/^#\s+(.+)\n?/);return m&&m[1].trim().toLowerCase()===(title||'').trim().toLowerCase()?text.slice(m[0].length):text}
+function note(text,extra){const p=document.createElement('p');p.className='label'+(extra?' '+extra:'');p.textContent=text;return p}
+function exchange(number,question,quote,answer){const box=document.createElement('section');box.className='ex'+(answer?'':' waiting');const q=document.createElement('p');q.className='q';const n=document.createElement('span');n.className='n';n.textContent='Q'+number;q.append(n,document.createTextNode(question));box.append(q);if(quote){const blockquote=document.createElement('blockquote');blockquote.textContent=quote;box.append(blockquote)}const body=document.createElement('div');if(answer)markdown(answer,body);else body.append(note('waiting for your model… esc cancels'));box.append(body);return box}
+function footer(){if(!state)return'';if(state.busy||state.error||flash)return state.status;const pages=state.pages.length;return [state.model,'in memory',pages?pages+' page'+(pages===1?'':'s'):'no pages'].join(' · ')}
+function flashStatus(){clearTimeout(flashTimer);flash=1;flashTimer=setTimeout(()=>{flash=0;render()},6000)}
+function render(){if(!state)return;const current=state.current;
+if(current&&document.activeElement!==$('url'))$('url').value=current.article.url;
+const list=$('pages');list.replaceChildren();for(const page of state.pages){const option=document.createElement('option');option.value=page.url;option.label=page.title;list.append(option)}
+const body=$('article');body.replaceChildren();
+if(current){const h1=document.createElement('h1');h1.textContent=current.article.title;body.append(h1);
+if(mode==='summary'){body.append(note('recap · type /article to return to the page','recap'));const recap=document.createElement('div');markdown(current.summary||'*No recap yet. Type /recap to make one.*',recap);body.append(recap)}
+else{if(current.article.warning)body.append(note(current.article.warning));const text=document.createElement('div');markdown(withoutTitle(current.article.markdown,current.article.title),text);body.append(text)}}
+else body.append(note('paste a url above to begin. nothing is saved; everything lives in this session.'));
+const thread=$('thread');thread.replaceChildren();const exchanges=current?current.exchanges:[];
+exchanges.forEach((item,index)=>thread.append(exchange(index+1,item.question,item.selection,item.answer)));
+if(pending)thread.append(exchange(exchanges.length+1,pending.question,pending.selection,''));
+thread.hidden=!thread.childElementCount;
+// A passage attached in an earlier tab is still attached here: show it rather than hide the state.
+if(current&&current.selection&&!selected)selected=current.selection;showQuote();
+$('foot').textContent=footer();$('foot').className='foot'+(state.error?' error':'')+(state.busy?' busy':'');dockSpace()}
+function showQuote(){$('quoted').hidden=!selected;$('quotedText').textContent='“'+selected+'”'}
+function toBottom(){scrollTo({top:document.body.scrollHeight,behavior:'smooth'})}
+function grow(){const question=$('question');question.style.height='auto';question.style.height=question.scrollHeight+'px';dockSpace()}
+// The bar is fixed, so the column has to reserve its height to keep the last lines readable.
+function dockSpace(){document.body.style.paddingBottom=$('dock').offsetHeight+'px'}
+async function refresh(){state=await api('state');render();if(!state.current)$('url').focus()}
+async function run(action,payload,item){const id=++requestId;pending=item||null;
+try{state={...state,busy:true,error:false,status:action==='summary'?'Summarizing your reading and discussion… Esc cancels.':action==='load'?'Loading article… Esc cancels.':'Asking your pi model… Esc cancels.'};render();if(item)toBottom();
+const result=await api(action,payload);
+if(id===requestId){pending=null;state=result;selected=state.current?.selection||'';render();flashStatus();if(item)toBottom()}
+return !result.error}
+catch(error){if(id===requestId){pending=null;fail(error)}return false}}
+async function explain(){if(!selected)return;await run('explain',{selection:selected},{question:'Explain this passage.',selection:selected})}
+async function escape(){if(state?.busy){requestId++;pending=null;state=await api('cancel',{});flashStatus();render();return}
+if(selected){selected='';$('hint').hidden=true;getSelection()?.removeAllRanges();state=await api('select',{selection:''});render();return}
+if(mode==='summary'){mode='article';render()}}
+$('loadForm').addEventListener('submit',event=>{event.preventDefault();const url=$('url').value.trim();if(!url)return;selected='';mode='article';$('url').blur();run('load',{url})});
+// Picking a loaded page from the url line's list reopens its discussion immediately.
+$('url').addEventListener('input',event=>{if(event.inputType!=='insertReplacementText')return;const url=$('url').value.trim();if(state?.pages.some(page=>page.url===url)&&url!==state.current?.article.url){selected='';mode='article';$('url').blur();run('load',{url})}});
+$('askForm').addEventListener('submit',event=>{event.preventDefault();const value=$('question').value.trim();if(!value)return;
+const command=value.toLowerCase();
+if(command==='/recap'||command==='/summary'||command==='/summarize'){$('question').value='';grow();mode='summary';run('summary',{});return}
+if(command==='/article'||command==='/read'){$('question').value='';grow();mode='article';render();return}
+if(command.charAt(0)==='/'){state={...state,error:true,status:'Unknown command. Type /recap for a recap, /article to return to the page.'};flashStatus();render();return}
+run('ask',{question:value,selection:selected},{question:value,selection:selected}).then(sent=>{if(sent){$('question').value='';grow()}})});
+$('question').addEventListener('input',grow);
+$('question').addEventListener('keydown',event=>{if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();$('askForm').requestSubmit()}});
+function captureSelection(){const selection=getSelection();if(!selection||selection.isCollapsed)return;const range=selection.getRangeAt(0);const node=range.commonAncestorContainer.nodeType===1?range.commonAncestorContainer:range.commonAncestorContainer.parentElement;if(!$('article').contains(node))return;const text=selection.toString().replace(/\s+/g,' ').trim().slice(0,20000);if(!text)return;selected=text;showQuote();api('select',{selection:selected}).catch(fail)}
+function placeHint(){const hint=$('hint');const selection=getSelection();if(!selection||selection.isCollapsed||!selection.rangeCount){hint.hidden=true;return}const range=selection.getRangeAt(0);const node=range.commonAncestorContainer.nodeType===1?range.commonAncestorContainer:range.commonAncestorContainer.parentElement;const rects=range.getClientRects();const rect=rects[rects.length-1];if(!$('article').contains(node)||!rect){hint.hidden=true;return}hint.hidden=false;hint.style.transform='translate('+Math.round(Math.max(4,Math.min(rect.right+10,innerWidth-96)))+'px,'+Math.round(Math.max(4,rect.top))+'px)'}
+$('article').addEventListener('mouseup',captureSelection);$('article').addEventListener('keyup',captureSelection);
+document.addEventListener('selectionchange',placeHint);addEventListener('scroll',placeHint,{passive:true});addEventListener('resize',placeHint);addEventListener('resize',dockSpace);
+// Every remaining action is a keystroke: enter explains a selection, esc unwinds, any letter starts a question.
+addEventListener('keydown',event=>{const typing=event.target===$('question')||event.target===$('url');
+if(event.key==='Escape'){event.preventDefault();escape().catch(fail);return}
+if(typing||event.metaKey||event.ctrlKey||event.altKey)return;
+if(event.key==='Enter'){if(selected){event.preventDefault();explain().catch(fail)}return}
+if(event.key.length===1&&event.key!==' '){event.preventDefault();const question=$('question');question.focus();question.value+=event.key;grow()}});
+dockSpace();
+refresh().catch(fail);
 </script>
 </body></html>`;
 }

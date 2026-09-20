@@ -29,10 +29,9 @@ export interface BrowserReaderOptions { launch?: (url: string) => Promise<void> 
 
 function browserStatus(status: string): string {
   return status
-    .replace(/Esc cancels\.?/g, "Use Cancel to stop the request.")
-    .replace("Tab to the question box to ask about this page.", "Ask about this page in the sidebar.")
-    .replace("F3 switches back to the article.", "Use Article and Recap to switch views.")
-    .replace("F2 summarizes your learnings so far.", "You can now summarize your learnings.")
+    .replace("Tab to the question box to ask about this page.", "Type below to ask about this page.")
+    .replace("F3 switches back to the article.", "Type /article to return to the page.")
+    .replace("F2 summarizes your learnings so far.", "Type /recap to summarize your learnings.")
     .replace("click/drag in fullscreen, or press v in the article.", "select text in the article first.");
 }
 
