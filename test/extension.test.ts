@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { test } from "node:test";
 import type { ExtensionAPI, ExtensionCommandContext, Theme } from "@earendil-works/pi-coding-agent";
 import readerExtension from "../src/index.ts";
@@ -11,7 +14,24 @@ const theme = {
 } as unknown as Theme;
 
 test("extension opens, answers, summarizes, reopens and forgets state at session boundaries", async (t) => {
+  // Exercise the stubbed session model regardless of the user's reader configuration.
+  const directory = await mkdtemp(join(tmpdir(), "pi-reader-extension-"));
   const hooks = new Map<string, () => void>();
+  // node:test runs after hooks in registration order, so this one shuts the extension down
+  // while its config still exists; the env restores registered below run after it.
+  t.after(async () => {
+    hooks.get("session_shutdown")?.();
+    await rm(directory, { recursive: true, force: true });
+  });
+  // Every override is restored even when an assertion throws part way through the test.
+  const useEnv = (name: string, value: string) => {
+    const previous = process.env[name];
+    t.after(() => { if (previous === undefined) delete process.env[name]; else process.env[name] = previous; });
+    process.env[name] = value;
+  };
+  const configPath = join(directory, "reader.json");
+  await writeFile(configPath, JSON.stringify({ defaultModel: null, defaultThinkingLevel: "medium" }));
+  useEnv("PI_READER_CONFIG", configPath);
   let command!: (args: string, ctx: ExtensionCommandContext) => Promise<void>;
   // No session mutation APIs: this test fails if the extension tries to persist a message/entry.
   readerExtension({
@@ -21,7 +41,6 @@ test("extension opens, answers, summarizes, reopens and forgets state at session
       command = options.handler;
     },
   } as unknown as ExtensionAPI);
-  t.after(() => { hooks.get("session_shutdown")?.(); });
   let view!: ReaderView;
   let calls = 0;
   const firstModel = { provider: "custom-provider", id: "test-model", api: "openai-responses", reasoning: true, contextWindow: 128_000, maxTokens: 32_000 };
@@ -44,8 +63,13 @@ test("extension opens, answers, summarizes, reopens and forgets state at session
     },
   } as unknown as ExtensionCommandContext;
 
+  // Bounded: a /reader that returns without opening a view must fail here by name, not wedge the runner.
   const waitForView = async (previous?: ReaderView) => {
-    while (!view || view === previous) await new Promise((resolve) => setTimeout(resolve, 1));
+    const deadline = Date.now() + 10_000;
+    while (!view || view === previous) {
+      assert.ok(Date.now() < deadline, `/reader opened no view. Last notice: ${notifications.at(-1) ?? "none"}`);
+      await new Promise((resolve) => setTimeout(resolve, 1));
+    }
   };
 
   hooks.get("session_start")!();
@@ -78,11 +102,8 @@ test("extension opens, answers, summarizes, reopens and forgets state at session
   view.close();
   await pending;
 
-  const oldOpen = process.env.PI_READER_BROWSER_OPEN;
-  process.env.PI_READER_BROWSER_OPEN = "0";
+  useEnv("PI_READER_BROWSER_OPEN", "0");
   await command("--browser", ctx);
-  if (oldOpen === undefined) delete process.env.PI_READER_BROWSER_OPEN;
-  else process.env.PI_READER_BROWSER_OPEN = oldOpen;
   const browserUrl = notifications.at(-1)!.match(/http:\/\/127\.0\.0\.1:\d+\/[^ ]+\//)![0];
   const webState = await (await fetch(`${browserUrl}api/state`)).json() as { model: string };
   assert.equal(webState.model, "custom-provider/next-model · thinking:medium");

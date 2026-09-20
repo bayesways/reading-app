@@ -3,8 +3,10 @@ import { test } from "node:test";
 import type { Model } from "@earendil-works/pi-ai";
 import { parseCliArgs, resolveStandaloneSelection } from "../src/cli.ts";
 import {
+  loadReaderConfig,
   parseModelId,
   parseReaderConfig,
+  READER_CONFIG_PATH,
   resolveReaderModel,
   resolveThinkingLevel,
   THINKING_LEVELS,
@@ -29,6 +31,13 @@ test("repo config accepts pi model IDs and every supported thinking level", () =
   assert.throws(() => parseReaderConfig('{"model":"x"}'), /unknown setting/);
   assert.throws(() => parseReaderConfig('{"defaultModel":"no-slash"}'), /provider\/model/);
   assert.throws(() => parseReaderConfig('{"defaultThinkingLevel":"extreme"}'), /must be null or one of/);
+});
+
+// reader.config.json ships in the package, so a bad edit must fail here and not on someone's first /reader.
+test("the shipped reader config loads and parses", async () => {
+  const config = await loadReaderConfig(READER_CONFIG_PATH);
+  if (config.defaultModel !== null) assert.ok(parseModelId(config.defaultModel).modelId);
+  assert.ok(config.defaultThinkingLevel === null || THINKING_LEVELS.includes(config.defaultThinkingLevel));
 });
 
 test("configured model overrides pi's active model and thinking is clamped to capabilities", () => {
