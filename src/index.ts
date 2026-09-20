@@ -1,5 +1,6 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { BrowserReader, parseReaderCommand } from "./browser.ts";
+import { loadReaderConfig, resolveReaderModel, resolveThinkingLevel, type ReaderThinkingLevel } from "./config.ts";
 import { createAnswer } from "./model.ts";
 import { ReaderState, type Answer } from "./reader.ts";
 import { ReaderView } from "./ui.ts";
@@ -44,16 +45,24 @@ export default function readerExtension(pi: ExtensionAPI): void {
         ctx.ui.notify("Browser reader stopped and its in-memory data was cleared.", "info");
         return;
       }
-      const modelLabel = ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : "No session model selected";
+      let config;
+      try { config = await loadReaderConfig(); }
+      catch (error) { ctx.ui.notify((error as Error).message, "error"); return; }
+      let model;
+      try { model = resolveReaderModel(config, ctx.modelRegistry, ctx.model); }
+      catch (error) { ctx.ui.notify((error as Error).message, "error"); return; }
+      const fallbackThinking = ((ctx.thinkingLevel as ReaderThinkingLevel | undefined) ?? "medium");
+      const thinkingLevel = resolveThinkingLevel(config, model, fallbackThinking);
+      const modelLabel = model ? `${model.provider}/${model.id} · thinking:${thinkingLevel}` : `No model · thinking:${thinkingLevel}`;
       if (command.browser) {
-        browser ??= new BrowserReader(new ReaderState(createAnswer(ctx)), modelLabel);
+        browser ??= new BrowserReader(new ReaderState(createAnswer(ctx, model, thinkingLevel)), modelLabel);
         const result = await browser.open(command.url);
         if (result.launched) ctx.ui.notify(`Browser reader opened at ${result.url}`, "info");
         else ctx.ui.notify(`Could not launch a browser (${result.error}). Open ${result.url}`, "warning");
         return;
       }
       if (view) return;
-      answer = createAnswer(ctx);
+      answer = createAnswer(ctx, model, thinkingLevel);
       state ??= new ReaderState((...params) => {
         if (!answer) throw new Error("The reader session has ended.");
         return answer(...params);

@@ -10,7 +10,7 @@ const theme = {
   bold: identity, italic: identity, strikethrough: identity, underline: identity,
 } as unknown as Theme;
 
-test("extension opens, answers, summarizes, reopens and forgets state at session boundaries", async () => {
+test("extension opens, answers, summarizes, reopens and forgets state at session boundaries", async (t) => {
   const hooks = new Map<string, () => void>();
   let command!: (args: string, ctx: ExtensionCommandContext) => Promise<void>;
   // No session mutation APIs: this test fails if the extension tries to persist a message/entry.
@@ -21,9 +21,10 @@ test("extension opens, answers, summarizes, reopens and forgets state at session
       command = options.handler;
     },
   } as unknown as ExtensionAPI);
+  t.after(() => { hooks.get("session_shutdown")?.(); });
   let view!: ReaderView;
   let calls = 0;
-  const firstModel = { provider: "custom-provider", id: "test-model", contextWindow: 128_000, maxTokens: 8192 };
+  const firstModel = { provider: "custom-provider", id: "test-model", api: "openai-responses", reasoning: true, contextWindow: 128_000, maxTokens: 32_000 };
   const nextModel = { ...firstModel, id: "next-model" };
   let selectedModel = firstModel;
   const requestModels: unknown[] = [];
@@ -43,8 +44,13 @@ test("extension opens, answers, summarizes, reopens and forgets state at session
     },
   } as unknown as ExtensionCommandContext;
 
+  const waitForView = async (previous?: ReaderView) => {
+    while (!view || view === previous) await new Promise((resolve) => setTimeout(resolve, 1));
+  };
+
   hooks.get("session_start")!();
   let pending = command("", ctx);
+  await waitForView();
   assert.match(view.render(120)[0], /custom-provider\/test-model/);
   selectedModel = nextModel; // Even a changed context getter cannot silently switch this reader's model.
   view.state.current = {
@@ -61,7 +67,9 @@ test("extension opens, answers, summarizes, reopens and forgets state at session
   view.close();
   await pending;
 
+  const firstView = view;
   pending = command("", ctx);
+  await waitForView(firstView);
   assert.equal(view.state.current!.exchanges.length, 1);
   assert.match(view.render(120)[0], /custom-provider\/next-model/);
   await view.state.ask("Another question");
@@ -77,7 +85,7 @@ test("extension opens, answers, summarizes, reopens and forgets state at session
   else process.env.PI_READER_BROWSER_OPEN = oldOpen;
   const browserUrl = notifications.at(-1)!.match(/http:\/\/127\.0\.0\.1:\d+\/[^ ]+\//)![0];
   const webState = await (await fetch(`${browserUrl}api/state`)).json() as { model: string };
-  assert.equal(webState.model, "custom-provider/next-model");
+  assert.equal(webState.model, "custom-provider/next-model · thinking:medium");
 
   hooks.get("session_shutdown")!();
   await new Promise((resolve) => setTimeout(resolve, 20));
@@ -86,7 +94,9 @@ test("extension opens, answers, summarizes, reopens and forgets state at session
   assert.equal(previousState.current, undefined);
 
   hooks.get("session_start")!();
+  const secondView = view;
   pending = command("", ctx);
+  await waitForView(secondView);
   assert.equal(view.state.current, undefined);
   assert.notEqual(view.state, previousState);
   view.close();

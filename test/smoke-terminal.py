@@ -103,7 +103,7 @@ def main():
                 browser_url = match.group().decode()
                 with urllib.request.urlopen(browser_url + "api/state", timeout=5) as response:
                     state = json.load(response)
-                assert state["model"] == "openai/gpt-4o"
+                assert state["model"] == "openai/gpt-4o · thinking:off"
                 assert state["current"]["article"]["title"] == "Reader smoke fixture"
                 assert "Bayesian inference" in state["current"]["article"]["markdown"]
                 start = len(transcript)

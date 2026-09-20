@@ -27,6 +27,26 @@ From this project:
 
 ```sh
 npm install
+```
+
+Configure the reader defaults in the repo-root [`reader.config.json`](reader.config.json):
+
+```json
+{
+  "defaultModel": "openai/gpt-5.2",
+  "defaultThinkingLevel": "medium"
+}
+```
+
+`defaultModel` is a pi `provider/model` identifier (including custom models from pi's `models.json`). Use `pi --list-models` or `/model` to find one, and authenticate it once with pi's `/login` or the provider's API-key environment variable. Set it to `null` to inherit the active pi model in extension mode and pi's configured default model in standalone mode.
+
+`defaultThinkingLevel` accepts `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, or `null`. `null` inherits pi's current/per-model/default setting. Pi clamps unsupported levels to the nearest level the chosen model exposes; the effective value is visible beside the model in both reader headers. The checked-in default is `medium` with no model override.
+
+The config is read whenever a reader starts. A running browser server keeps its bound model and effort; stop and restart it to apply edits. Set `PI_READER_CONFIG=/path/to/config.json` to use another file.
+
+To use the extension, start pi:
+
+```sh
 pi
 ```
 
@@ -61,7 +81,30 @@ For a one-off test without project discovery:
 pi --no-extensions -e ./src/index.ts
 ```
 
-Use your normal pi `/login` and `/model` before opening either reader. Reading itself needs no model credentials. **The header shows the launching session's `provider/model`**, and both questions and recaps use that exact model through pi's model registry with your existing authentication. There is no fallback to another model. The terminal model is bound while its overlay is open; the browser model is bound while its local server is running. To switch the browser model, use `/reader --browser-stop`, select a model with `/model`, then start the browser reader again. The readers use separate reading conversations, not the coding session's chat history.
+Reading itself needs no model credentials. Questions and recaps use the configured model through pi's model registry and existing authentication. If `defaultModel` is `null`, extension mode uses the model selected by `/model`; otherwise the repo config overrides it **for reader requests only** and does not alter the main pi session. The header shows the effective `provider/model · thinking:level`. There is no fallback to another model after launch. To switch a running browser reader, use `/reader --browser-stop`, edit the config or use `/model` when inheriting, then start it again. Reader conversations remain separate from the coding session's chat history.
+
+## Launch directly from the terminal
+
+The standalone command opens the browser reader without opening pi's TUI:
+
+```sh
+npm start -- https://example.com/article
+```
+
+To install the command globally from this checkout:
+
+```sh
+npm link
+pi-reader https://example.com/article
+```
+
+You can also invoke it directly as `./bin/pi-reader.mjs URL`. It uses pi's SDK model runtime, model catalog, custom `models.json`, and credentials; it does not create or save a pi chat session. Keep the terminal process running while using the page and press Ctrl+C to stop the loopback server.
+
+```text
+pi-reader [--no-open] [--config /path/to/reader.json] [URL]
+```
+
+`--no-open` prints the protected localhost URL without opening a browser. Run `pi-reader --help` for the complete usage text.
 
 ## Browser reader
 
@@ -146,7 +189,7 @@ Recaps use the loaded article and that URL's completed discussion (including the
 
 - Articles, selected passages, conversations, and recaps are **in memory only**. They are discarded on session switch, new session, fork, reload, or pi exit. `/reader --browser-stop` also clears the browser workspace. Nothing is appended to pi's saved conversation. Terminal scrollback and browser history are outside the extension's control.
 - Loading fetches only the requested HTTP(S) page and up to five redirects. No browser cookies, login sessions, page scripts, or subresources are used. Fetching can reach local HTTP services if you explicitly supply their URL.
-- Asking sends the extracted article, any attached passage, and its discussion to the launching session's model provider. Summarizing sends the article and completed discussion, including excerpts recorded in that discussion. Provider retention/billing policies still apply; these direct model calls are not included in pi's normal conversation usage totals.
+- Asking sends the extracted article, any attached passage, and its discussion to the configured pi model provider. Summarizing sends the article and completed discussion, including excerpts recorded in that discussion. Provider retention/billing policies still apply; these direct model calls are not included in pi's normal conversation usage totals.
 - Mozilla Readability extracts the main content; Turndown converts it to Markdown. Layout, images (except alt text), interactive elements, and exact browser styling are not preserved. Links are displayed, not navigated within the reader; paste another URL to load it.
 - Paywalls, JavaScript-only sites, PDFs, and login-required pages are unsupported. Some publishers block automated requests. Extraction can omit content; use the original source when accuracy is critical.
 - Downloads are limited to **2 MiB / 20 seconds**, model requests to **3 minutes**. Oversized model context is rejected with an error rather than silently truncating the source or discussion. Select a larger-context model outside the reader if needed.
@@ -161,8 +204,9 @@ npm test
 python3 test/smoke-terminal.py  # real pi in a PTY; local HTTP fixture, no LLM calls
 python3 test/smoke-terminal.py --fullscreen  # includes real SGR mouse click/drag selection
 python3 test/smoke-terminal.py --browser  # real pi command plus protected loopback API
+python3 test/smoke-cli.py  # standalone command, config resolution, and clean shutdown
 ```
 
-`src/article.ts` handles extraction, `src/reader.ts` owns ephemeral per-URL state, `src/model.ts` handles model requests, `src/selection.ts` maps grapheme-safe terminal selections, `src/ui.ts` renders the terminal workspace, and `src/browser.ts`/`src/browser-page.ts` provide the loopback web workspace. `src/index.ts` connects commands and session lifecycle hooks.
+`src/article.ts` handles extraction, `src/reader.ts` owns ephemeral per-URL state, `src/config.ts` validates repo defaults, `src/model.ts` handles model/thinking requests, `src/selection.ts` maps grapheme-safe terminal selections, `src/ui.ts` renders the terminal workspace, and `src/browser.ts`/`src/browser-page.ts` provide the loopback web workspace. `src/index.ts` connects pi commands and lifecycle hooks; `src/cli.ts` and `bin/pi-reader.mjs` provide standalone launch.
 
-Tests cover extraction, fetch limits/redirects, URL isolation, cancellation races, model identity/context limits, lifecycle cleanup, selected-passage snapshots, terminal keyboard/mouse selection, Unicode widths, browser API authorization/CSP/input limits, and responsive terminal rendering. Model behavior is tested with a mocked registry, not paid provider calls.
+Tests cover extraction, fetch limits/redirects, URL isolation, cancellation races, model/thinking configuration and context limits, lifecycle cleanup, selected-passage snapshots, terminal keyboard/mouse selection, Unicode widths, browser API authorization/CSP/input limits, standalone startup, and responsive terminal rendering. Model behavior is tested with a mocked registry, not paid provider calls.

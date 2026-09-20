@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { Model } from "@earendil-works/pi-ai";
 import { ReaderState, type Answer } from "../src/reader.ts";
-import { buildContext, createAnswer } from "../src/model.ts";
+import { buildContext, createAnswer, createRuntimeAnswer } from "../src/model.ts";
 
 const load = async (url: string) => ({ url, title: url, markdown: `Source for ${url}` });
 const answer: Answer = async (reading, question, kind) => `${kind}: ${question} about ${reading.article.url}`;
@@ -142,6 +143,38 @@ test("model adapter uses registry authentication and refuses silent context trun
   state.current!.article.markdown = "x".repeat(128_000);
   await assert.rejects(createAnswer(ctx)(state.current!, "Why?", "question", new AbortController().signal), /safe context budget/);
   assert.equal(captured.length, 1);
+});
+
+test("configured thinking effort reaches extension and standalone pi model runtimes", async () => {
+  const reasoningModel = {
+    provider: "openai", id: "gpt-test", api: "openai-responses", name: "test", reasoning: true,
+    input: ["text"], contextWindow: 128_000, maxTokens: 32_000,
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+  } as Model<any>;
+  const reading = {
+    article: { url: "https://example.com", title: "Example", markdown: "A sufficiently long source about evidence and uncertainty." },
+    exchanges: [], summary: "", draft: "", articleScroll: 0, chatScroll: 0, summaryScroll: 0,
+  };
+  let registryOptions: Record<string, unknown> = {};
+  const ctx = {
+    model: reasoningModel,
+    modelRegistry: { complete: async (_model: unknown, _context: unknown, options: Record<string, unknown>) => {
+      registryOptions = options;
+      return { stopReason: "stop", content: [{ type: "text", text: "extension answer" }] };
+    } },
+  } as unknown as ExtensionContext;
+  assert.equal(await createAnswer(ctx, reasoningModel, "high")(reading, "Why?", "question", new AbortController().signal), "extension answer");
+  assert.equal(registryOptions.reasoningEffort, "high");
+  assert.equal(registryOptions.maxTokens, 20_480);
+
+  let simpleOptions: Record<string, unknown> = {};
+  const runtime = { completeSimple: async (_model: unknown, _context: unknown, options: Record<string, unknown>) => {
+    simpleOptions = options;
+    return { stopReason: "stop", content: [{ type: "text", text: "standalone answer" }] };
+  } };
+  assert.equal(await createRuntimeAnswer(runtime as never, reasoningModel, "low")(reading, "Why?", "question", new AbortController().signal), "standalone answer");
+  assert.equal(simpleOptions.reasoning, "low");
+  assert.equal(simpleOptions.maxTokens, 4096);
 });
 
 test("selected passages are snapshotted per question and included in recaps without leaking URLs", async () => {
