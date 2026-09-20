@@ -63,7 +63,7 @@ article hr{border:0;border-top:1px solid var(--line);margin:2em 0}
 <script nonce="${nonce}">
 'use strict';
 const base=location.pathname.endsWith('/')?location.pathname:location.pathname+'/';
-const $=id=>document.getElementById(id); let state; let selected=''; let mode='article'; let requestId=0; let pending=null; let flash=0; let flashTimer=0; let loading='';
+const $=id=>document.getElementById(id); let state; let selected=''; let mode='article'; let requestId=0; let pending=null; let flash=0; let flashTimer=0; let loading=null;
 const safeUrl=value=>{try{const u=new URL(value);return u.protocol==='http:'||u.protocol==='https:'?u.href:null}catch{return null}};
 function inline(parent,text){const re=/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)|\x60([^\x60]+)\x60|\*\*([^*]+)\*\*|\*([^*]+)\*/g;let at=0,m;while((m=re.exec(text))){parent.append(document.createTextNode(text.slice(at,m.index)));let node;if(m[1]){node=document.createElement('a');node.textContent=m[1];node.href=safeUrl(m[2])||'#';node.target='_blank';node.rel='noopener noreferrer'}else if(m[3]){node=document.createElement('code');node.textContent=m[3]}else{node=document.createElement(m[4]?'strong':'em');node.textContent=m[4]||m[5]}parent.append(node);at=re.lastIndex}parent.append(document.createTextNode(text.slice(at)))}
 function markdown(text,root){root.replaceChildren();const lines=(text||'').split('\n');let i=0;while(i<lines.length){const line=lines[i];if(!line.trim()){i++;continue}if(/^\x60\x60\x60/.test(line)){const code=[];i++;while(i<lines.length&&!/^\x60\x60\x60/.test(lines[i]))code.push(lines[i++]);i++;const pre=document.createElement('pre'),c=document.createElement('code');c.textContent=code.join('\n');pre.append(c);root.append(pre);continue}const heading=line.match(/^(#{1,6})\s+(.+)/);if(heading){const h=document.createElement('h'+Math.min(heading[1].length+1,6));inline(h,heading[2]);root.append(h);i++;continue}if(/^([-*_])(?:\s*\1){2,}\s*$/.test(line)){root.append(document.createElement('hr'));i++;continue}if(/^>\s?/.test(line)){const q=document.createElement('blockquote'),parts=[];while(i<lines.length&&/^>\s?/.test(lines[i]))parts.push(lines[i++].replace(/^>\s?/,''));inline(q,parts.join('\n'));root.append(q);continue}const list=line.match(/^\s*(?:([-+*])|(\d+)\.)\s+(.+)/);if(list){const tag=list[2]?'ol':'ul',el=document.createElement(tag);while(i<lines.length){const item=lines[i].match(/^\s*(?:([-+*])|(\d+)\.)\s+(.+)/);if(!item||Boolean(item[2])!==Boolean(list[2]))break;const li=document.createElement('li');inline(li,item[3]);el.append(li);i++}root.append(el);continue}const parts=[line];i++;while(i<lines.length&&lines[i].trim()&&!/^(#{1,6})\s|^\x60\x60\x60|^>\s?|^\s*(?:[-+*]|\d+\.)\s+/.test(lines[i]))parts.push(lines[i++]);const p=document.createElement('p');inline(p,parts.join(' '));root.append(p)}}
@@ -76,7 +76,7 @@ function exchange(number,question,quote,answer){const box=document.createElement
 function footer(){if(!state)return'';if(state.busy||state.error||flash)return state.status;const pages=state.pages.length;return [state.model,'in memory',pages?pages+' page'+(pages===1?'':'s'):'no pages'].join(' · ')}
 function flashStatus(){clearTimeout(flashTimer);flash=1;flashTimer=setTimeout(()=>{flash=0;render()},6000)}
 function render(){if(!state)return;const current=state.current;
-const shown=loading||(current?current.article.url:'');
+const shown=loading?.url||(current?current.article.url:'');
 if(shown&&document.activeElement!==$('url'))$('url').value=shown;
 const list=$('pages');list.replaceChildren();for(const page of state.pages){const option=document.createElement('option');option.value=page.url;option.label=page.title;list.append(option)}
 const body=$('article');body.replaceChildren();
@@ -104,16 +104,17 @@ if(id===requestId){pending=null;state=result;selected=state.current?.selection||
 return !result.error}
 catch(error){if(id===requestId){pending=null;fail(error)}return false}}
 async function explain(){if(!selected)return;await run('explain',{selection:selected},{question:'Explain this passage.',selection:selected})}
-async function escape(){if(state?.busy){requestId++;pending=null;loading='';state=await api('cancel',{});flashStatus();render();return}
+async function escape(){if(state?.busy){requestId++;pending=null;loading=null;state=await api('cancel',{});flashStatus();render();return}
 if(selected){selected='';$('hint').hidden=true;getSelection()?.removeAllRanges();state=await api('select',{selection:''});render();return}
 if(mode==='summary'){mode='article';render()}}
 // run('load') restores the selection from the snapshot it returns, so nothing is cleared here.
 function loadArticle(url){
-  if(url===loading)return;
-  loading=url;
+  if(url===loading?.url)return;
+  const operation={url};
+  loading=operation;
   mode='article';
   $('url').blur();
-  run('load',{url}).finally(()=>{if(loading===url){loading='';render()}});
+  run('load',{url}).finally(()=>{if(loading===operation){loading=null;render()}});
 }
 $('loadForm').addEventListener('submit',event=>{
   event.preventDefault();
