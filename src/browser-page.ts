@@ -10,7 +10,7 @@ export function browserPage(nonce: string): string {
 :root{color-scheme:dark;--bg:#121212;--text:#e0e0e0;--bright:#fff;--muted:#a0a0a0;--faint:#5e5a52;--line:#333;--accent:#a8d1a8;--danger:#e39191;--mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
 *{box-sizing:border-box}[hidden]{display:none !important}
 body{margin:0;background:var(--bg);color:var(--text);font:16px/1.7 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased}
-.col{max-width:720px;margin:0 auto;padding:40px 20px 64px}
+.col{max-width:720px;margin:0 auto;padding:40px 20px 28px}
 input,textarea{font:inherit;line-height:inherit;color:inherit;background:none;border:0;padding:0;margin:0;width:100%;resize:none;outline:none}
 input::placeholder,textarea::placeholder{color:var(--faint)}
 /* the only chrome: a wordmark and a bare url line. enter loads, no button. */
@@ -33,17 +33,21 @@ article hr{border:0;border-top:1px solid var(--line);margin:2em 0}
 .ex .n{font:500 .8rem var(--mono);color:var(--accent);margin-right:.6em}
 .ex blockquote{border-left:4px solid var(--accent);margin:0 0 1em;padding-left:18px;color:var(--muted);font-style:italic}
 .ex.waiting{color:var(--faint)}.ex.waiting .q{color:var(--muted)}
-.ask{display:flex;align-items:baseline;gap:10px;border-top:1px solid var(--line);margin-top:36px;padding-top:16px}
+/* the ask line and its foot stay docked; the article scrolls under them. */
+.dock{position:fixed;left:0;right:0;bottom:0;z-index:3;background:var(--bg);border-top:1px solid var(--line)}
+.dock::before{content:"";position:absolute;left:0;right:0;bottom:100%;height:36px;background:linear-gradient(to top,var(--bg),transparent);pointer-events:none}
+.bar{max-width:720px;margin:0 auto;padding:16px 20px 18px}
+.ask{display:flex;align-items:baseline;gap:10px}
 .ask .caret{flex:none;color:var(--accent)}.ask form{flex:1;min-width:0}#question{max-height:40vh;overflow:auto}
 .quoted{display:flex;gap:10px;font-size:.9rem;color:var(--accent);margin-bottom:.6rem}
 .quoted .text{flex:1;min-width:0;font-style:italic;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .quoted .esc{flex:none;font:.74rem var(--mono);color:var(--faint)}
-.foot{margin-top:18px;font:.74rem/1.6 var(--mono);color:var(--faint)}.foot.error{color:var(--danger)}.foot.busy{animation:pulse 1.2s ease-in-out infinite alternate}
+.foot{margin-top:12px;font:.74rem/1.6 var(--mono);color:var(--faint)}.foot.error{color:var(--danger)}.foot.busy{animation:pulse 1.2s ease-in-out infinite alternate}
 @keyframes pulse{to{opacity:.45}}
 /* follows the live selection; the only action affordance on the page. */
 .hint{position:fixed;top:0;left:0;z-index:2;font:.72rem var(--mono);color:var(--accent);background:var(--bg);border:1px solid var(--line);border-radius:4px;padding:2px 7px;pointer-events:none;white-space:nowrap}
 ::selection{background:rgba(168,209,168,.22)}
-@media(max-width:600px){.col{padding:28px 16px 48px}h1{font-size:1.7rem}}
+@media(max-width:600px){.col{padding:28px 16px 24px}.bar{padding:12px 16px 14px}h1{font-size:1.7rem}}
 </style>
 </head>
 <body>
@@ -51,9 +55,10 @@ article hr{border:0;border-top:1px solid var(--line);margin:2em 0}
 <div class="top"><span class="mark">reader</span><form id="loadForm"><input id="url" type="url" inputmode="url" list="pages" spellcheck="false" placeholder="paste a url, then press enter" aria-label="Article URL"></form><datalist id="pages"></datalist></div>
 <article id="article"></article>
 <section class="thread" id="thread" hidden></section>
-<div class="ask"><span class="caret">&rsaquo;</span><form id="askForm"><div class="quoted" id="quoted" hidden><span class="text" id="quotedText"></span><span class="esc">esc clears</span></div><textarea id="question" rows="1" placeholder="ask, or /recap" aria-label="Ask about this article"></textarea></form></div>
-<div class="foot" id="foot">Connecting to pi…</div>
 </div>
+<div class="dock" id="dock"><div class="bar"><div class="ask"><span class="caret">&rsaquo;</span><form id="askForm"><div class="quoted" id="quoted" hidden><span class="text" id="quotedText"></span><span class="esc">esc clears</span></div><textarea id="question" rows="1" placeholder="ask, or /recap" aria-label="Ask about this article"></textarea></form></div>
+<div class="foot" id="foot">Connecting to pi…</div>
+</div></div>
 <span class="hint" id="hint" hidden>&crarr; explain</span>
 <script nonce="${nonce}">
 'use strict';
@@ -84,10 +89,12 @@ if(pending)thread.append(exchange(exchanges.length+1,pending.question,pending.se
 thread.hidden=!thread.childElementCount;
 // A passage attached in an earlier tab is still attached here: show it rather than hide the state.
 if(current&&current.selection&&!selected)selected=current.selection;showQuote();
-$('foot').textContent=footer();$('foot').className='foot'+(state.error?' error':'')+(state.busy?' busy':'')}
+$('foot').textContent=footer();$('foot').className='foot'+(state.error?' error':'')+(state.busy?' busy':'');dockSpace()}
 function showQuote(){$('quoted').hidden=!selected;$('quotedText').textContent='“'+selected+'”'}
 function toBottom(){scrollTo({top:document.body.scrollHeight,behavior:'smooth'})}
-function grow(){const question=$('question');question.style.height='auto';question.style.height=question.scrollHeight+'px'}
+function grow(){const question=$('question');question.style.height='auto';question.style.height=question.scrollHeight+'px';dockSpace()}
+// The bar is fixed, so the column has to reserve its height to keep the last lines readable.
+function dockSpace(){document.body.style.paddingBottom=$('dock').offsetHeight+'px'}
 async function refresh(){state=await api('state');render();if(!state.current)$('url').focus()}
 async function run(action,payload,item){const id=++requestId;pending=item||null;
 try{state={...state,busy:true,error:false,status:action==='summary'?'Summarizing your reading and discussion… Esc cancels.':action==='load'?'Loading article… Esc cancels.':'Asking your pi model… Esc cancels.'};render();if(item)toBottom();
@@ -113,13 +120,14 @@ $('question').addEventListener('keydown',event=>{if(event.key==='Enter'&&!event.
 function captureSelection(){const selection=getSelection();if(!selection||selection.isCollapsed)return;const range=selection.getRangeAt(0);const node=range.commonAncestorContainer.nodeType===1?range.commonAncestorContainer:range.commonAncestorContainer.parentElement;if(!$('article').contains(node))return;const text=selection.toString().replace(/\s+/g,' ').trim().slice(0,20000);if(!text)return;selected=text;showQuote();api('select',{selection:selected}).catch(fail)}
 function placeHint(){const hint=$('hint');const selection=getSelection();if(!selection||selection.isCollapsed||!selection.rangeCount){hint.hidden=true;return}const range=selection.getRangeAt(0);const node=range.commonAncestorContainer.nodeType===1?range.commonAncestorContainer:range.commonAncestorContainer.parentElement;const rects=range.getClientRects();const rect=rects[rects.length-1];if(!$('article').contains(node)||!rect){hint.hidden=true;return}hint.hidden=false;hint.style.transform='translate('+Math.round(Math.max(4,Math.min(rect.right+10,innerWidth-96)))+'px,'+Math.round(Math.max(4,rect.top))+'px)'}
 $('article').addEventListener('mouseup',captureSelection);$('article').addEventListener('keyup',captureSelection);
-document.addEventListener('selectionchange',placeHint);addEventListener('scroll',placeHint,{passive:true});addEventListener('resize',placeHint);
+document.addEventListener('selectionchange',placeHint);addEventListener('scroll',placeHint,{passive:true});addEventListener('resize',placeHint);addEventListener('resize',dockSpace);
 // Every remaining action is a keystroke: enter explains a selection, esc unwinds, any letter starts a question.
 addEventListener('keydown',event=>{const typing=event.target===$('question')||event.target===$('url');
 if(event.key==='Escape'){event.preventDefault();escape().catch(fail);return}
 if(typing||event.metaKey||event.ctrlKey||event.altKey)return;
 if(event.key==='Enter'){if(selected){event.preventDefault();explain().catch(fail)}return}
 if(event.key.length===1&&event.key!==' '){event.preventDefault();const question=$('question');question.focus();question.value+=event.key;grow()}});
+dockSpace();
 refresh().catch(fail);
 </script>
 </body></html>`;

@@ -113,9 +113,10 @@ pi-reader [--no-open] [--config /path/to/reader.json] [URL]
 - A bare **URL line**. Type a URL and press Enter to load it. It also lists the pages already loaded in this session, so picking one reopens its discussion.
 - Native mouse or keyboard **text selection**. Select a word or passage and press Enter to explain it, or simply start typing to ask your own question with that passage attached.
 - The **attached passage** is shown above the ask line until Esc clears it.
+- The **ask line and its foot** stay docked to the bottom of the window, so they are in reach however long the article is; the article scrolls under them.
 - **`/recap`** in the ask line summarizes your learnings; **`/article`** returns to the page.
 - **Esc** cancels a running article or model request.
-- One grey line at the foot carries the model, `in memory`, and the number of loaded pages. While pi is working it shows request status instead, then goes back.
+- One grey line under the ask line carries the model, `in memory`, and the number of loaded pages. While pi is working it shows request status instead, then goes back.
 
 | Key | Action |
 | --- | --- |

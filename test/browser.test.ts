@@ -248,6 +248,12 @@ test("browser page renders one column with no buttons, dropdowns or status bar",
   assert.match(document.getElementById("thread")!.textContent!, /worse moves/);
   assert.equal(document.getElementById("foot")!.textContent, "provider/model · in memory · 1 page");
   assert.equal((document.getElementById("url") as HTMLInputElement).value, "https://example.com/a");
+  // The ask line and its foot are a bar fixed to the window, not the tail of a long article.
+  const dock = document.getElementById("dock")!;
+  assert.equal(dock.closest(".col"), null);
+  assert.ok(dock.contains(document.getElementById("question")!) && dock.contains(document.getElementById("foot")!));
+  assert.match(page, /\.dock\{[^}]*position:fixed[^}]*bottom:0/);
+  assert.match(document.body.style.paddingBottom, /px$/); // The column reserves the bar's height.
 });
 
 test("browser page asks and runs /recap and /article from the ask line", async () => {
