@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { test } from "node:test";
+import { test, type TestContext } from "node:test";
 import vm from "node:vm";
 import { JSDOM, VirtualConsole } from "jsdom";
 import { BrowserReader, parseReaderCommand, type BrowserSnapshot } from "../src/browser.ts";
@@ -201,7 +201,7 @@ function fixture(): BrowserSnapshot {
 }
 
 /** Drives the real client script in jsdom with the pi API stubbed out. */
-async function client(snapshot = fixture()) {
+async function client(t: TestContext, snapshot = fixture()) {
   const calls: Array<{ action: string; body?: Record<string, unknown> }> = [];
   let hang = false;
   const dom = new JSDOM(browserPage("test-nonce"), {
@@ -220,6 +220,8 @@ async function client(snapshot = fixture()) {
     },
   });
   const { window } = dom;
+  // flashStatus arms a 6s timer on every transition; an unclosed window keeps it, and its listeners, alive.
+  t.after(() => window.close());
   const settle = async () => { for (let i = 0; i < 4; i++) await new Promise((done) => window.setTimeout(done, 0)); };
   await settle();
   return {
@@ -236,10 +238,10 @@ async function client(snapshot = fixture()) {
   };
 }
 
-test("browser page renders one column with no buttons, dropdowns or status bar", async () => {
+test("browser page renders one column with no buttons, dropdowns or status bar", async (t) => {
   const page = browserPage("test-nonce");
   assert.doesNotMatch(page, /<button|<select/i); // Every action is a keystroke or the url/ask line.
-  const ui = await client();
+  const ui = await client(t);
   const document = ui.window.document;
   assert.equal(ui.calls[0].action, "state");
   assert.equal(document.querySelector("h1")?.textContent, "Annealing");
@@ -256,8 +258,8 @@ test("browser page renders one column with no buttons, dropdowns or status bar",
   assert.match(document.body.style.paddingBottom, /px$/); // The column reserves the bar's height.
 });
 
-test("browser page asks and runs /recap and /article from the ask line", async () => {
-  const ui = await client();
+test("browser page asks and runs /recap and /article from the ask line", async (t) => {
+  const ui = await client(t);
   ui.type("question", "What is annealing?");
   await ui.submit("askForm");
   assert.deepEqual(ui.calls.at(-1), { action: "ask", body: { question: "What is annealing?", selection: "" } });
@@ -278,8 +280,8 @@ test("browser page asks and runs /recap and /article from the ask line", async (
   assert.match(ui.$("foot").textContent!, /Unknown command/);
 });
 
-test("browser page loads a url, types into the ask line and unwinds with Escape", async () => {
-  const ui = await client();
+test("browser page loads a url, types into the ask line and unwinds with Escape", async (t) => {
+  const ui = await client(t);
   ui.type("url", "https://example.com/b");
   await ui.submit("loadForm");
   assert.deepEqual(ui.calls.at(-1), { action: "load", body: { url: "https://example.com/b" } });
@@ -297,10 +299,10 @@ test("browser page loads a url, types into the ask line and unwinds with Escape"
   assert.doesNotMatch(ui.$("thread").textContent!, /waiting for your model/);
 });
 
-test("browser page restores an attached passage, explains it with Enter and clears it with Escape", async () => {
+test("browser page restores an attached passage, explains it with Enter and clears it with Escape", async (t) => {
   const snapshot = fixture();
   snapshot.current!.selection = "worse moves";
-  const ui = await client(snapshot);
+  const ui = await client(t, snapshot);
   assert.equal(ui.$("quoted").hidden, false); // The attached quote is visible, not hidden state.
   assert.match(ui.$("quotedText").textContent!, /worse moves/);
   await ui.press("Enter");
@@ -313,8 +315,7 @@ test("browser page restores an attached passage, explains it with Enter and clea
 test("browser page only reopens a saved URL when selected from the URL list", async (t) => {
   const snapshot = fixture();
   snapshot.pages.push({ url: "https://example.com/b", title: "Another page" });
-  const ui = await client(snapshot);
-  t.after(() => ui.window.close());
+  const ui = await client(t, snapshot);
   const input = async (url: string, inputType: string) => {
     ui.type("url", url);
     ui.$("url").dispatchEvent(new ui.window.InputEvent("input", { inputType, bubbles: true }));
@@ -334,9 +335,41 @@ test("browser page only reopens a saved URL when selected from the URL list", as
   assert.doesNotMatch(ui.$("article").textContent!, /recap · type \/article/);
 });
 
+test("browser page reopens a saved URL from a datalist pick whatever events the engine sends", async (t) => {
+  const snapshot = fixture();
+  snapshot.pages.push({ url: "https://example.com/b", title: "Another page" });
+  const ui = await client(t, snapshot);
+  const pick = async (events: string[]) => {
+    ui.type("url", "https://example.com/b");
+    for (const type of events) {
+      ui.$("url").dispatchEvent(type === "change"
+        ? new ui.window.Event("change", { bubbles: true })
+        : new ui.window.InputEvent("input", { inputType: type, bubbles: true }));
+    }
+    await ui.settle();
+    return ui.calls.filter(({ action }) => action === "load").length;
+  };
+  // Engines that never set insertReplacementText still reopen the page on the committed value.
+  assert.equal(await pick(["change"]), 1);
+  // Engines that send both describe one pick, so it must not load twice.
+  assert.equal(await pick(["insertReplacementText", "change"]), 2);
+});
+
+test("browser page shows the URL it is loading, not the page that is still on screen", async (t) => {
+  const ui = await client(t);
+  ui.hangNext();
+  ui.type("url", "https://example.com/b");
+  await ui.submit("loadForm");
+  assert.deepEqual(ui.calls.at(-1), { action: "load", body: { url: "https://example.com/b" } });
+  assert.match(ui.$("foot").textContent!, /Loading article/);
+  assert.equal((ui.$("url") as HTMLInputElement).value, "https://example.com/b");
+  await ui.press("Escape"); // Cancelling puts the URL of the article still on screen back.
+  assert.equal(ui.calls.at(-1)!.action, "cancel");
+  assert.equal((ui.$("url") as HTMLInputElement).value, "https://example.com/a");
+});
+
 test("browser selection capture and hint accept article text and reject outside or collapsed ranges", async (t) => {
-  const ui = await client();
-  t.after(() => ui.window.close());
+  const ui = await client(t);
   const { document } = ui.window;
   const selection = ui.window.getSelection()!;
   const select = async (node: Node, collapse = false) => {
@@ -354,7 +387,10 @@ test("browser selection capture and hint accept article text and reject outside 
   const paragraph = document.querySelector("article p")!;
   paragraph.textContent = "  Body\n text.  ";
   for (const node of [paragraph.firstChild!, paragraph]) {
+    ui.$("quotedText").textContent = "";
+    const sent = ui.calls.length;
     await select(node);
+    assert.equal(ui.calls.length, sent + 1); // Each range is captured on its own, not left over from the last.
     assert.deepEqual(ui.calls.at(-1), { action: "select", body: { selection: "Body text." } });
     assert.equal(ui.$("hint").hidden, false);
     assert.equal(ui.$("hint").style.transform, "translate(110px,20px)");

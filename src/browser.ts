@@ -3,20 +3,26 @@ import { randomBytes, timingSafeEqual } from "node:crypto";
 import { spawn } from "node:child_process";
 import { cleanText } from "./article.ts";
 import { browserPage } from "./browser-page.ts";
-import { ReaderState, type Reading } from "./reader.ts";
+import { ReaderState } from "./reader.ts";
 
 const MAX_API_BYTES = 64 * 1024;
 const MAX_QUESTION_CHARS = 10_000;
 const MAX_SELECTION_CHARS = 20_000;
 
+/** The page's wire contract. Spelled out, not derived from Reading, so nothing internal is served by accident. */
 export interface BrowserSnapshot {
   model: string;
   status: string;
   error: boolean;
   busy: boolean;
   showingSummary: boolean;
-  pages: Array<Pick<Reading["article"], "url" | "title">>;
-  current?: Pick<Reading, "article" | "exchanges" | "summary" | "selection">;
+  pages: Array<{ url: string; title: string }>;
+  current?: {
+    article: { url: string; title: string; markdown: string; warning?: string };
+    exchanges: Array<{ question: string; answer: string; selection?: string }>;
+    summary: string;
+    selection?: string;
+  };
 }
 
 export interface BrowserOpenResult { url: string; launched: boolean; error?: string }
@@ -37,8 +43,14 @@ function snapshot(state: ReaderState, model: string): BrowserSnapshot {
     showingSummary: state.showingSummary,
     pages: [...state.readings.values()].map(({ article }) => ({ url: article.url, title: article.title })),
     ...(current ? { current: {
-      article: current.article,
-      exchanges: current.exchanges,
+      // Copied field by field on purpose: the reading model is internal, this payload is the page's API.
+      article: {
+        url: current.article.url, title: current.article.title, markdown: current.article.markdown,
+        ...(current.article.warning ? { warning: current.article.warning } : {}),
+      },
+      exchanges: current.exchanges.map(({ question, answer, selection }) => ({
+        question, answer, ...(selection ? { selection } : {}),
+      })),
       summary: current.summary,
       ...(current.selection ? { selection: current.selection } : {}),
     } } : {}),
