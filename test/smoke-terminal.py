@@ -4,6 +4,7 @@ import fcntl
 import http.server
 import os
 import pty
+import re
 import select
 import shutil
 import signal
@@ -14,6 +15,9 @@ import tempfile
 import termios
 import threading
 import time
+import urllib.error
+import urllib.request
+import json
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -37,6 +41,7 @@ class Page(http.server.BaseHTTPRequestHandler):
 
 
 def main():
+    browser_mode = "--browser" in sys.argv
     mode = "fullscreen" if "--fullscreen" in sys.argv else "regular"
     executable = shutil.which("pi")
     if not executable:
@@ -77,7 +82,8 @@ def main():
 
     try:
         with tempfile.TemporaryDirectory(prefix="pi-reader-smoke-") as config:
-            env = dict(os.environ, TERM="xterm-256color", PI_CODING_AGENT_DIR=config, PI_TELEMETRY="0")
+            env = dict(os.environ, TERM="xterm-256color", PI_CODING_AGENT_DIR=config,
+                    PI_TELEMETRY="0", PI_READER_BROWSER_OPEN="0")
             proc = subprocess.Popen([
                 executable, "--offline", "--no-session", "--no-extensions", "--no-skills",
                 "--no-prompt-templates", "--no-context-files", "--no-themes", "--no-approve",
@@ -88,19 +94,42 @@ def main():
             wait_for("gpt-4o")
             # Let the editor attach after startup status has printed.
             drain()
-            start = len(transcript)
-            os.write(master, f"/reader http://127.0.0.1:{server.server_port}/article\r".encode())
-            wait_for("Reader smoke fixture", start)
-            wait_for("QUESTIONS", start)
-            wait_for("openai/gpt-4o", start)
-            drain()
-            start = len(transcript)
-            os.write(master, b"vw")  # Keyboard cursor at the title, select its first word.
-            wait_for("Selected: Reader", start)
-            drain()
-            os.write(master, b"\x1b[19~")  # F8 clears without closing.
-            drain()
-            if mode == "fullscreen":
+            if browser_mode:
+                start = len(transcript)
+                os.write(master, f"/reader --browser http://127.0.0.1:{server.server_port}/article\r".encode())
+                wait_for("Browser reader opened at", start)
+                match = re.search(rb"http://127\.0\.0\.1:\d+/[A-Za-z0-9_-]{43}/", transcript[start:])
+                assert match, f"No browser capability URL in output: {transcript[start:]!r}"
+                browser_url = match.group().decode()
+                with urllib.request.urlopen(browser_url + "api/state", timeout=5) as response:
+                    state = json.load(response)
+                assert state["model"] == "openai/gpt-4o"
+                assert state["current"]["article"]["title"] == "Reader smoke fixture"
+                assert "Bayesian inference" in state["current"]["article"]["markdown"]
+                start = len(transcript)
+                os.write(master, b"/reader --browser-stop\r")
+                wait_for("Browser reader stopped", start)
+                try:
+                    urllib.request.urlopen(browser_url + "api/state", timeout=2)
+                    raise AssertionError("Browser reader remained reachable after --browser-stop")
+                except urllib.error.URLError:
+                    pass
+                os.write(master, b"\x04")
+            else:
+                start = len(transcript)
+                os.write(master, f"/reader http://127.0.0.1:{server.server_port}/article\r".encode())
+            if not browser_mode:
+                wait_for("Reader smoke fixture", start)
+                wait_for("QUESTIONS", start)
+                wait_for("openai/gpt-4o", start)
+                drain()
+                start = len(transcript)
+                os.write(master, b"vw")  # Keyboard cursor at the title, select its first word.
+                wait_for("Selected: Reader", start)
+                drain()
+                os.write(master, b"\x1b[19~")  # F8 clears without closing.
+                drain()
+            if not browser_mode and mode == "fullscreen":
                 start = len(transcript)
                 # Drag across 'Reader' on the first article row (SGR mouse, 1-based coordinates).
                 os.write(master, b"\x1b[<0;1;5M\x1b[<32;6;5M\x1b[<0;6;5m")
@@ -112,18 +141,19 @@ def main():
                 drain()
                 os.write(master, b"\x1b[19~")
                 drain()
-            os.write(master, b"\x1b")
-            drain()
-            start = len(transcript)
-            os.write(master, b"/reader\r")
-            wait_for("Reader smoke fixture", start)
-            fcntl.ioctl(master, termios.TIOCSWINSZ, struct.pack("HHHH", 20, 72, 0, 0))
-            start = len(transcript)
-            os.kill(proc.pid, signal.SIGWINCH)
-            wait_for("Tab switches panes", start)
-            os.write(master, b"\x03")  # Close reader, not pi.
-            drain()
-            os.write(master, b"\x04")
+            if not browser_mode:
+                os.write(master, b"\x1b")
+                drain()
+                start = len(transcript)
+                os.write(master, b"/reader\r")
+                wait_for("Reader smoke fixture", start)
+                fcntl.ioctl(master, termios.TIOCSWINSZ, struct.pack("HHHH", 20, 72, 0, 0))
+                start = len(transcript)
+                os.kill(proc.pid, signal.SIGWINCH)
+                wait_for("Tab switches panes", start)
+                os.write(master, b"\x03")  # Close reader, not pi.
+                drain()
+                os.write(master, b"\x04")
             deadline = time.monotonic() + 10
             while proc.poll() is None and time.monotonic() < deadline:
                 if select.select([master], [], [], 0.1)[0]:
@@ -133,7 +163,8 @@ def main():
                         break
             assert proc.poll() == 0, f"pi did not exit cleanly: {transcript[-2000:]!r}"
             assert not list(Path(config).rglob("*.jsonl")), "Unexpected saved session"
-            print(f"PASS ({mode}): model header, article, selection, reopen, resize, clean exit; no saved session")
+            label = "browser" if browser_mode else mode
+            print(f"PASS ({label}): model header, article, selection/API, lifecycle, clean exit; no saved session")
     finally:
         if proc is not None and proc.poll() is None:
             proc.kill()

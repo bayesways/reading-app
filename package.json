@@ -1,7 +1,7 @@
 {
   "name": "pi-terminal-reader",
   "version": "0.1.0",
-  "description": "An in-memory terminal article reader with per-URL Q&A and learning summaries for pi",
+  "description": "An in-memory terminal and local-browser article reader with per-URL Q&A for pi",
   "type": "module",
   "keywords": ["pi-package"],
   "files": ["src", "README.md"],

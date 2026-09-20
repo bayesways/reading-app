@@ -1,6 +1,6 @@
 # Pi Terminal Reader
 
-Read an article and explore it with your selected pi model, entirely inside the terminal.
+Read an article and explore it with your selected pi model in either pi's terminal UI or an optional local browser workspace. Pi remains the Q&A backend in both modes.
 
 ```text
  π READER provider/model · in memory · 2 page(s)
@@ -37,7 +37,16 @@ Trust this project's extension when prompted. In an already-running pi session, 
 /reader https://example.com/article
 ```
 
-Or `/reader` to open an empty URL bar or return to the current reading.
+Or `/reader` to open an empty URL bar or return to the current terminal reading.
+
+For the browser reader:
+
+```text
+/reader --browser https://example.com/article
+```
+
+This starts a private loopback server, opens the reader in your default browser, and immediately returns control to pi. `/reader -b URL` is equivalent. Run `/reader --browser` again to reopen the same browser workspace, or `/reader --browser-stop` to stop it and clear its browser-side in-memory data.
+
 The project entry point is `.pi/extensions/reader.ts`.
 
 To use it from other projects, install this directory as a pi package:
@@ -52,9 +61,26 @@ For a one-off test without project discovery:
 pi --no-extensions -e ./src/index.ts
 ```
 
-Use your normal pi `/login` and `/model` before opening the reader. Reading itself needs no model credentials. **The header shows the launching session's `provider/model`**, and both questions and recaps use that exact model through pi's model registry with your existing authentication. It is bound for the lifetime of the reader window, with no fallback to another model. To switch, close the reader, use `/model`, then reopen `/reader`; your in-memory reading discussion remains available. The reader uses a separate reading conversation, not the coding session's chat history.
+Use your normal pi `/login` and `/model` before opening either reader. Reading itself needs no model credentials. **The header shows the launching session's `provider/model`**, and both questions and recaps use that exact model through pi's model registry with your existing authentication. There is no fallback to another model. The terminal model is bound while its overlay is open; the browser model is bound while its local server is running. To switch the browser model, use `/reader --browser-stop`, select a model with `/model`, then start the browser reader again. The readers use separate reading conversations, not the coding session's chat history.
 
-## Controls
+## Browser reader
+
+`/reader --browser URL` serves an extracted reader-mode page—not the publisher's live site—with the article on the left and URL-scoped Q&A on the right. The browser UI provides:
+
+- Native mouse or keyboard text selection. Select a word or passage, then choose **Explain**, or type a custom question and choose **Ask**.
+- A persistent selected-passage preview; **Clear** stops attaching it to future questions.
+- Per-URL article switching and separate discussions.
+- **Summarize my learnings**, with Article/Recap view buttons.
+- A Cancel button for article/model requests.
+- Responsive single-column layout on narrow browser windows.
+
+The browser tab talks only to the extension's random localhost address. Closing the tab does not stop the server, so `/reader --browser` can reopen it with the current session's state. It shuts down automatically on session switch, reload, or pi exit. Use `/reader --browser-stop` to stop it immediately and erase its browser workspace.
+
+If pi cannot launch a browser—for example over SSH—it prints the localhost URL in a notification so you can open it on the same machine. Set `PI_READER_BROWSER_OPEN=0` to always print the URL without launching a browser.
+
+The terminal and browser workspaces are intentionally separate, so running one cannot alter the other frontend's selected passage or pending request.
+
+## Terminal controls
 
 | Key | Action |
 | --- | --- |
@@ -118,13 +144,14 @@ Recaps use the loaded article and that URL's completed discussion (including the
 
 ## Privacy and limits
 
-- Articles, selected passages, conversations, and recaps are **in memory only**. They are discarded on session switch, new session, fork, reload, or pi exit. Nothing is appended to pi's saved conversation. Terminal scrollback/logging is outside the extension's control.
+- Articles, selected passages, conversations, and recaps are **in memory only**. They are discarded on session switch, new session, fork, reload, or pi exit. `/reader --browser-stop` also clears the browser workspace. Nothing is appended to pi's saved conversation. Terminal scrollback and browser history are outside the extension's control.
 - Loading fetches only the requested HTTP(S) page and up to five redirects. No browser cookies, login sessions, page scripts, or subresources are used. Fetching can reach local HTTP services if you explicitly supply their URL.
 - Asking sends the extracted article, any attached passage, and its discussion to the launching session's model provider. Summarizing sends the article and completed discussion, including excerpts recorded in that discussion. Provider retention/billing policies still apply; these direct model calls are not included in pi's normal conversation usage totals.
 - Mozilla Readability extracts the main content; Turndown converts it to Markdown. Layout, images (except alt text), interactive elements, and exact browser styling are not preserved. Links are displayed, not navigated within the reader; paste another URL to load it.
 - Paywalls, JavaScript-only sites, PDFs, and login-required pages are unsupported. Some publishers block automated requests. Extraction can omit content; use the original source when accuracy is critical.
 - Downloads are limited to **2 MiB / 20 seconds**, model requests to **3 minutes**. Oversized model context is rejected with an error rather than silently truncating the source or discussion. Select a larger-context model outside the reader if needed.
 - Article text is treated as untrusted reference material, terminal control sequences are removed, and the reading model receives **no tools**.
+- Browser mode binds only to `127.0.0.1` on a random port and uses a new 256-bit capability URL whenever it starts. API calls require that capability and the matching origin/host. Responses disable caching and MIME sniffing; the page uses a nonce-based Content Security Policy, sends no referrer, loads no remote scripts/styles/images, and renders article/model text through DOM text nodes rather than raw HTML. Anyone who obtains the capability URL while it is running can access that in-memory browser workspace, so do not share it.
 
 ## Development
 
@@ -133,8 +160,9 @@ npm run check
 npm test
 python3 test/smoke-terminal.py  # real pi in a PTY; local HTTP fixture, no LLM calls
 python3 test/smoke-terminal.py --fullscreen  # includes real SGR mouse click/drag selection
+python3 test/smoke-terminal.py --browser  # real pi command plus protected loopback API
 ```
 
-`src/article.ts` handles extraction, `src/reader.ts` owns ephemeral per-URL state, `src/model.ts` handles model requests, `src/selection.ts` maps grapheme-safe selections to rendered article cells, and `src/ui.ts` renders the split-pane workspace. `src/index.ts` connects command and session lifecycle hooks.
+`src/article.ts` handles extraction, `src/reader.ts` owns ephemeral per-URL state, `src/model.ts` handles model requests, `src/selection.ts` maps grapheme-safe terminal selections, `src/ui.ts` renders the terminal workspace, and `src/browser.ts`/`src/browser-page.ts` provide the loopback web workspace. `src/index.ts` connects commands and session lifecycle hooks.
 
-Tests cover extraction, fetch limits/redirects, URL isolation, cancellation races, model identity/context limits, lifecycle cleanup, selected-passage snapshots, keyboard and mouse selection, Unicode widths, and terminal resizing. Model behavior is tested with a mocked registry, not paid provider calls.
+Tests cover extraction, fetch limits/redirects, URL isolation, cancellation races, model identity/context limits, lifecycle cleanup, selected-passage snapshots, terminal keyboard/mouse selection, Unicode widths, browser API authorization/CSP/input limits, and responsive terminal rendering. Model behavior is tested with a mocked registry, not paid provider calls.

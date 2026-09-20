@@ -27,6 +27,7 @@ test("extension opens, answers, summarizes, reopens and forgets state at session
   const nextModel = { ...firstModel, id: "next-model" };
   let selectedModel = firstModel;
   const requestModels: unknown[] = [];
+  const notifications: string[] = [];
   const ctx = {
     mode: "tui",
     get model() { return selectedModel; },
@@ -34,9 +35,12 @@ test("extension opens, answers, summarizes, reopens and forgets state at session
       requestModels.push(model);
       return { stopReason: "stop", content: [{ type: "text", text: ++calls === 1 ? "An explanation." : "# Learning recap\n\nYour key distinction." }] };
     } },
-    ui: { custom: (factory: (...args: unknown[]) => ReaderView) => new Promise<void>((resolve) => {
-      view = factory({ terminal: { rows: 30 }, requestRender: () => {} }, theme, {}, resolve);
-    }) },
+    ui: {
+      notify: (message: string) => notifications.push(message),
+      custom: (factory: (...args: unknown[]) => ReaderView) => new Promise<void>((resolve) => {
+        view = factory({ terminal: { rows: 30 }, requestRender: () => {} }, theme, {}, resolve);
+      }),
+    },
   } as unknown as ExtensionCommandContext;
 
   hooks.get("session_start")!();
@@ -63,8 +67,21 @@ test("extension opens, answers, summarizes, reopens and forgets state at session
   await view.state.ask("Another question");
   assert.equal(requestModels[2], nextModel); // Reopening binds to the new launching model.
   const previousState = view.state;
-  hooks.get("session_shutdown")!();
+  view.close();
   await pending;
+
+  const oldOpen = process.env.PI_READER_BROWSER_OPEN;
+  process.env.PI_READER_BROWSER_OPEN = "0";
+  await command("--browser", ctx);
+  if (oldOpen === undefined) delete process.env.PI_READER_BROWSER_OPEN;
+  else process.env.PI_READER_BROWSER_OPEN = oldOpen;
+  const browserUrl = notifications.at(-1)!.match(/http:\/\/127\.0\.0\.1:\d+\/[^ ]+\//)![0];
+  const webState = await (await fetch(`${browserUrl}api/state`)).json() as { model: string };
+  assert.equal(webState.model, "custom-provider/next-model");
+
+  hooks.get("session_shutdown")!();
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  await assert.rejects(fetch(`${browserUrl}api/state`));
   assert.equal(previousState.readings.size, 0);
   assert.equal(previousState.current, undefined);
 
