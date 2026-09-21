@@ -26,6 +26,10 @@ test("browser client is self-contained, syntactically valid and avoids HTML inje
   assert.ok(source);
   new vm.Script(source);
   assert.doesNotMatch(source, /\.innerHTML\s*=|insertAdjacentHTML|document\.write|\beval\s*\(|new Function/);
+  // In script data these end the element early or open the escaped states; the
+  // embedded parser is rewritten so neither survives. Nor does a map to 404 on.
+  assert.doesNotMatch(source, /<\/script|<!--/i);
+  assert.doesNotMatch(page, /sourceMappingURL/);
   assert.doesNotMatch(page, /<script[^>]+src=|<link[^>]+href=|<img/i);
 });
 
@@ -201,10 +205,12 @@ function fixture(): BrowserSnapshot {
 }
 
 /** Drives the real client script in jsdom with the pi API stubbed out. */
-async function client(t: TestContext, snapshot = fixture()) {
+async function client(t: TestContext, snapshot = fixture(), holdFirstResponse = false) {
   const calls: Array<{ action: string; body?: Record<string, unknown> }> = [];
   let hang = false;
   let nextResponse: Promise<BrowserSnapshot> | undefined;
+  let releaseFirst: ((snapshot: BrowserSnapshot) => void) | undefined;
+  if (holdFirstResponse) nextResponse = new Promise((done) => { releaseFirst = done; });
   const dom = new JSDOM(browserPage("test-nonce"), {
     runScripts: "dangerously", url: "http://127.0.0.1:1/capability/", virtualConsole: new VirtualConsole(),
     beforeParse(window) {
@@ -233,6 +239,7 @@ async function client(t: TestContext, snapshot = fixture()) {
   await settle();
   return {
     window, calls, settle,
+    releaseFirst: (response = snapshot) => { releaseFirst!(response); },
     hangNext: () => { hang = true; },
     deferNext: () => {
       let resolve!: (snapshot: BrowserSnapshot) => void;
@@ -379,7 +386,7 @@ test("browser restores per-article drafts after canonical URL switches and faile
   assert.equal((ui.$("question") as HTMLTextAreaElement).value, "Draft for B");
 });
 
-test("late answers from a switched article cannot clear either article's draft", async (t) => {
+test("an answer that lands after a page switch clears its own draft, not the new page's", async (t) => {
   const ui = await client(t);
   ui.type("question", "Question for A");
   const answer = ui.deferNext();
@@ -400,7 +407,46 @@ test("late answers from a switched article cannot clear either article's draft",
   await ui.submit("loadForm");
   back(fixture());
   await ui.settle();
-  assert.equal((ui.$("question") as HTMLTextAreaElement).value, "Question for A");
+  // The page switch superseded the response, but the server still answered the
+  // question, so leaving it in A's composer would only invite a duplicate ask.
+  assert.equal((ui.$("question") as HTMLTextAreaElement).value, "");
+});
+
+test("a question typed while the first snapshot is in flight belongs to the article that arrives", async (t) => {
+  const ui = await client(t, fixture(), true);
+  ui.type("question", "Typed while connecting");
+  ui.releaseFirst();
+  await ui.settle();
+  assert.equal((ui.$("question") as HTMLTextAreaElement).value, "Typed while connecting");
+  const b = fixture();
+  b.current!.article.url = "https://example.com/b";
+  const load = ui.deferNext();
+  ui.type("url", "https://example.com/b");
+  await ui.submit("loadForm");
+  load(b);
+  await ui.settle();
+  assert.equal((ui.$("question") as HTMLTextAreaElement).value, "");
+});
+
+test("a snapshot that is already busy elsewhere still accepts a question", async (t) => {
+  // Nothing re-polls state, so a busy flag from another tab or the TUI would
+  // otherwise disable this composer for the life of the page.
+  const busy = { ...fixture(), busy: true, status: "Asking your pi model… Esc cancels." };
+  const ui = await client(t, busy);
+  ui.type("question", "Still answerable");
+  await ui.submit("askForm");
+  assert.deepEqual(ui.calls.at(-1), { action: "ask", body: { question: "Still answerable", selection: "" } });
+});
+
+test("an unknown command reports itself even while a question is in flight", async (t) => {
+  const ui = await client(t);
+  ui.hangNext();
+  ui.type("question", "First question");
+  await ui.submit("askForm");
+  ui.type("question", "/recp");
+  await ui.submit("askForm");
+  assert.match(ui.$("foot").textContent!, /Unknown command/);
+  assert.equal(ui.calls.filter(({ action }) => action === "ask").length, 1);
 });
 
 test("repeated submissions while busy do not replace the request or consume the next draft", async (t) => {
@@ -507,6 +553,16 @@ test("Markdown cannot create active HTML, remote images, or unsafe links", async
   for (const node of article.querySelectorAll("*")) {
     assert.ok([...node.attributes].every((attr) => !attr.name.startsWith("on")));
   }
+});
+
+test("Markdown links with no target in the page stay plain text", async (t) => {
+  const snapshot = fixture();
+  snapshot.current!.article.markdown = "# Annealing\n\nA [footnote](#fn1), a [backref](#fnref1) and an [empty]() link.\n\n![](https://example.com/x.png)\n";
+  const ui = await client(t, snapshot);
+  const article = ui.$("article");
+  assert.equal(article.querySelectorAll("a").length, 0); // Neither resolves against the source URL.
+  assert.match(article.textContent!, /A footnote, a backref and an empty link/);
+  assert.match(article.textContent!, /\[Image\]/); // An undescribed image is still marked, not a blank gap.
 });
 
 test("browser page restores an attached passage, explains it with Enter and clears it with Escape", async (t) => {

@@ -2,17 +2,32 @@ import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 
 // Embed the installed browser build so the reader remains self-contained and
-// works under its nonce-only CSP without fetching scripts from a CDN.
+// works under its nonce-only CSP without fetching scripts from a CDN. Reading it
+// is deferred so terminal-only sessions never pay for a file the page needs.
 const require = createRequire(import.meta.url);
-const parser = readFileSync(require.resolve("markdown-it/browser"), "utf8")
-  .replace(/<\/script/gi, "<\\/script");
+let bundle = "";
+function parserBundle(): string {
+  if (bundle) return bundle;
+  // Inside an inline script, `</script` ends the element and `<!--` opens the
+  // escaped states where a later `<script` would swallow the real close tag.
+  // Neutralizing both is enough, and `\/` and `\-` mean the same inside the
+  // bundle's own strings and regexes. The map the bundle points at is not served.
+  bundle = readFileSync(require.resolve("markdown-it/browser"), "utf8")
+    .replace(/\s*\/\/# sourceMappingURL=\S*/g, "")
+    .replace(/<\/script/gi, "<\\/script")
+    .replace(/<!--/g, "<!\\--");
+  return bundle;
+}
 
-export const browserMarkdown = parser + String.raw`
+const renderer = String.raw`
 const markdownParser = window.markdownit({ html: false, linkify: false, typographer: false });
 const markdownTags = new Set(['p','blockquote','ul','ol','li','h1','h2','h3','h4','h5','h6',
   'strong','em','s','a','table','thead','tbody','tr','th','td']);
 
 function markdownUrl(value, sourceUrl) {
+  // A bare fragment has no target in the rendered page, and resolving it against
+  // the source would send every footnote marker back out to the original site.
+  if (!value || value.startsWith('#')) return null;
   try {
     const url = new URL(value, sourceUrl);
     return ['http:', 'https:'].includes(url.protocol) && !url.username && !url.password ? url.href : null;
@@ -75,7 +90,7 @@ function markdownTokens(tokens, root, sourceUrl) {
     } else if (token.type === 'image') {
       const description = document.createDocumentFragment();
       markdownTokens(token.children || [], description, sourceUrl);
-      parent.append(document.createTextNode(description.textContent ? '[Image: ' + description.textContent + ']' : ''));
+      parent.append(document.createTextNode(description.textContent ? '[Image: ' + description.textContent + ']' : '[Image]'));
     } else {
       parent.append(document.createTextNode(token.content || ''));
     }
@@ -87,3 +102,7 @@ function markdown(text, root, sourceUrl) {
   markdownTokens(markdownParser.parse(text || '', {}), root, sourceUrl);
 }
 `;
+
+export function browserMarkdown(): string {
+  return parserBundle() + renderer;
+}

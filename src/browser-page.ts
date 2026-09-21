@@ -67,9 +67,12 @@ article hr{border:0;border-top:1px solid var(--line);margin:2em 0}
 <button class="hint" id="hint" type="button" hidden aria-label="Explain the selected passage">&crarr; explain</button>
 <script nonce="${nonce}">
 'use strict';
-${browserMarkdown}
+${browserMarkdown()}
 const base=location.pathname.endsWith('/')?location.pathname:location.pathname+'/';
 const $=id=>document.getElementById(id); let state; let selected=''; let mode='article'; let requestId=0; let pending=null; let flash=0; let flashTimer=0; let loading=null;
+// This tab's own in-flight request, and the one Escape cancelled. A snapshot can
+// arrive busy because another tab is asking, and that flag never clears on its own.
+let busyId=0; let cancelled=0;
 // Browser drafts are local to this tab, keyed by the server's canonical article URL.
 const drafts = new Map();
 let draftUrl = '';
@@ -83,23 +86,28 @@ function saveDraft() {
 }
 function restoreDraft(url) {
   if (url === draftUrl) return;
-  saveDraft();
+  const previous = saveDraft();
+  // Text typed before the first snapshot belongs to no article yet; the first one
+  // to arrive adopts it rather than leaving it stranded under the empty key.
+  if (!draftUrl && url && previous.text) { drafts.set(url, previous); drafts.delete(''); }
   draftUrl = url;
   $('question').value = drafts.get(url)?.text || '';
   grow();
 }
 function clearSubmittedDraft(url, submitted) {
-  if (draftUrl === url) saveDraft();
-  if (drafts.get(url)?.revision !== submitted.revision) return;
-  drafts.set(url, { text: '', revision: submitted.revision + 1 });
-  if (draftUrl === url) { $('question').value = ''; grow(); }
+  // Every edit stores a new record, so holding the submitted one still means
+  // untouched. The first snapshot may have re-keyed a draft typed before it.
+  const key = drafts.get(url) === submitted ? url : draftUrl;
+  if (drafts.get(key) !== submitted) return;
+  drafts.set(key, { text: '', revision: submitted.revision + 1 });
+  if (draftUrl === key) { $('question').value = ''; grow(); }
 }
 async function api(action='',payload,method=payload?'POST':'GET'){const options={method,headers:{'Accept':'application/json'}};if(payload!==undefined){options.headers['Content-Type']='application/json';options.body=JSON.stringify(payload)}const response=await fetch(base+'api/'+action,options);const data=await response.json().catch(()=>({error:'Invalid response from pi.'}));if(!response.ok)throw new Error(data.error||('Request failed: '+response.status));return data}
 function fail(error){state={...state,busy:false,error:true,status:error.message};flashStatus();render()}
 // The title is rendered as the page's own heading; drop it from the body to avoid a duplicate.
 function withoutTitle(text,title){const m=(text||'').match(/^#\s+(.+)\n?/);return m&&m[1].trim().toLowerCase()===(title||'').trim().toLowerCase()?text.slice(m[0].length):text}
 function note(text,extra){const p=document.createElement('p');p.className='label'+(extra?' '+extra:'');p.textContent=text;return p}
-function exchange(number,question,quote,answer){const box=document.createElement('section');box.className='ex'+(answer?'':' waiting');const q=document.createElement('p');q.className='q';const n=document.createElement('span');n.className='n';n.textContent='Q'+number;q.append(n,document.createTextNode(question));box.append(q);if(quote){const blockquote=document.createElement('blockquote');blockquote.textContent=quote;box.append(blockquote)}const body=document.createElement('div');if(answer)markdown(answer,body,state?.current?.article.url);else body.append(note('waiting for your model… esc cancels'));box.append(body);return box}
+function exchange(number,question,quote,answer,sourceUrl){const box=document.createElement('section');box.className='ex'+(answer?'':' waiting');const q=document.createElement('p');q.className='q';const n=document.createElement('span');n.className='n';n.textContent='Q'+number;q.append(n,document.createTextNode(question));box.append(q);if(quote){const blockquote=document.createElement('blockquote');blockquote.textContent=quote;box.append(blockquote)}const body=document.createElement('div');if(answer)markdown(answer,body,sourceUrl);else body.append(note('waiting for your model… esc cancels'));box.append(body);return box}
 function footer(){if(!state)return'';if(state.busy||state.error||flash)return state.status;const pages=state.pages.length;return [state.model,'in memory',pages?pages+' page'+(pages===1?'':'s'):'no pages'].join(' · ')}
 function flashStatus(){clearTimeout(flashTimer);flash=1;flashTimer=setTimeout(()=>{flash=0;render()},6000)}
 function render(){if(!state)return;const current=state.current;
@@ -113,7 +121,7 @@ if(mode==='summary'){body.append(note('recap · type /article to return to the p
 else{if(current.article.warning)body.append(note(current.article.warning));const text=document.createElement('div');markdown(withoutTitle(current.article.markdown,current.article.title),text,current.article.url);body.append(text)}}
 else body.append(note('paste a url above to begin. nothing is saved; everything lives in this session.'));
 const thread=$('thread');thread.replaceChildren();const exchanges=current?current.exchanges:[];
-exchanges.forEach((item,index)=>thread.append(exchange(index+1,item.question,item.selection,item.answer)));
+exchanges.forEach((item,index)=>thread.append(exchange(index+1,item.question,item.selection,item.answer,current?.article.url)));
 if(pending)thread.append(exchange(exchanges.length+1,pending.question,pending.selection,''));
 thread.hidden=!thread.childElementCount;
 // A passage attached in an earlier tab is still attached here: show it rather than hide the state.
@@ -125,14 +133,16 @@ function grow(){const question=$('question');question.style.height='auto';questi
 // The bar is fixed, so the column has to reserve its height to keep the last lines readable.
 function dockSpace(){document.body.style.paddingBottom=$('dock').offsetHeight+'px'}
 async function refresh(){state=await api('state');render();if(!state.current)$('url').focus()}
-async function run(action,payload,item){const id=++requestId;pending=item||null;
+async function run(action,payload,item){const id=++requestId;busyId=id;pending=item||null;
 try{state={...state,busy:true,error:false,status:action==='summary'?'Summarizing your reading and discussion… Esc cancels.':action==='load'?'Loading article… Esc cancels.':'Asking your pi model… Esc cancels.'};render();if(item)toBottom();
 const result=await api(action,payload);
 if(id===requestId){pending=null;state=result;selected=state.current?.selection||'';render();flashStatus();if(item)toBottom()}
-return id===requestId&&!result.error}
-catch(error){if(id===requestId){pending=null;fail(error)}return false}}
-async function explain(){if(state?.busy)return;const live=selectionText();if(live){selected=live;showQuote()}if(!selected)return;await run('explain',{selection:selected},{question:'Explain this passage.',selection:selected})}
-async function escape(){if(state?.busy){requestId++;pending=null;loading=null;state=await api('cancel',{});flashStatus();render();return}
+// Loading another page supersedes a request the server still finished; only Escape undoes it.
+return id!==cancelled&&!result.error}
+catch(error){if(id===requestId){pending=null;fail(error)}return false}
+finally{if(busyId===id)busyId=0}}
+async function explain(){if(busyId)return;const live=selectionText();if(live){selected=live;showQuote()}if(!selected)return;await run('explain',{selection:selected},{question:'Explain this passage.',selection:selected})}
+async function escape(){if(state?.busy||busyId){cancelled=requestId;requestId++;busyId=0;pending=null;loading=null;state=await api('cancel',{});flashStatus();render();return}
 if(selected){selected='';$('hint').hidden=true;getSelection()?.removeAllRanges();state=await api('select',{selection:''});render();return}
 if(mode==='summary'){mode='article';render()}}
 // run('load') restores the selection from the snapshot it returns, so nothing is cleared here.
@@ -161,9 +171,9 @@ $('url').addEventListener('change',reopenSaved);
 $('askForm').addEventListener('submit',event=>{event.preventDefault();const value=$('question').value.trim();if(!value)return;
 const command=value.toLowerCase();
 if(command==='/article'||command==='/read'){$('question').value='';saveDraft();grow();mode='article';render();return}
-if(state?.busy)return;
-if(command==='/recap'||command==='/summary'||command==='/summarize'){$('question').value='';saveDraft();grow();mode='summary';run('summary',{});return}
+if(command==='/recap'||command==='/summary'||command==='/summarize'){if(busyId)return;$('question').value='';saveDraft();grow();mode='summary';run('summary',{});return}
 if(command.charAt(0)==='/'){state={...state,error:true,status:'Unknown command. Type /recap for a recap, /article to return to the page.'};flashStatus();render();return}
+if(busyId)return;
 const url=draftUrl;
 const submitted=saveDraft();
 run('ask',{question:value,selection:selected},{question:value,selection:selected}).then(sent=>{if(sent)clearSubmittedDraft(url,submitted)})});
