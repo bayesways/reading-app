@@ -240,7 +240,11 @@ async function client(t: TestContext, snapshot = fixture()) {
       return resolve;
     },
     $: (id: string) => window.document.getElementById(id)!,
-    type: (id: string, value: string) => { (window.document.getElementById(id) as HTMLTextAreaElement).value = value; },
+    type: (id: string, value: string) => {
+      const element = window.document.getElementById(id) as HTMLTextAreaElement;
+      element.value = value;
+      element.dispatchEvent(new window.InputEvent("input", { inputType: "insertText", bubbles: true }));
+    },
     submit: async (id: string) => { (window.document.getElementById(id) as HTMLFormElement).requestSubmit(); await settle(); },
     press: async (key: string, target?: unknown) => {
       ((target as { dispatchEvent: (event: unknown) => void } | undefined) ?? window.document)
@@ -310,6 +314,199 @@ test("browser page loads a url, types into the ask line and unwinds with Escape"
   await ui.press("Escape");
   assert.equal(ui.calls.at(-1)!.action, "cancel");
   assert.doesNotMatch(ui.$("thread").textContent!, /waiting for your model/);
+});
+
+test("browser preserves a new draft while an answer finishes, including edit-away-and-back", async (t) => {
+  const ui = await client(t);
+  const value = () => (ui.$("question") as HTMLTextAreaElement).value;
+  for (const next of ["My next question", "First question"]) {
+    ui.type("question", "First question");
+    const complete = ui.deferNext();
+    await ui.submit("askForm");
+    ui.type("question", "Edited draft");
+    ui.type("question", next);
+    complete(fixture());
+    await ui.settle();
+    assert.equal(value(), next);
+  }
+});
+
+test("browser preserves drafts after model failure and cancellation, ignoring late success", async (t) => {
+  const ui = await client(t);
+  ui.type("question", "Retry this question");
+  const fail = ui.deferNext();
+  await ui.submit("askForm");
+  fail({ ...fixture(), error: true, status: "Model failed" });
+  await ui.settle();
+  assert.equal((ui.$("question") as HTMLTextAreaElement).value, "Retry this question");
+
+  const complete = ui.deferNext();
+  await ui.submit("askForm");
+  await ui.press("Escape");
+  ui.type("question", "Draft after cancellation");
+  complete(fixture());
+  await ui.settle();
+  assert.equal((ui.$("question") as HTMLTextAreaElement).value, "Draft after cancellation");
+});
+
+test("browser restores per-article drafts after canonical URL switches and failed loads", async (t) => {
+  const ui = await client(t);
+  const a = fixture();
+  const b = fixture();
+  b.current!.article = { url: "https://example.com/canonical-b", title: "B", markdown: "Second article." };
+  const load = async (url: string, response: BrowserSnapshot) => {
+    const complete = ui.deferNext();
+    ui.type("url", url);
+    await ui.submit("loadForm");
+    complete(response);
+    await ui.settle();
+  };
+  ui.type("question", "Draft for A");
+  const complete = ui.deferNext();
+  ui.type("url", "https://example.com/b");
+  await ui.submit("loadForm");
+  // Until B loads, the visible article and composer still belong to A.
+  ui.type("question", "Updated draft for A\nwith another line");
+  complete(b);
+  await ui.settle();
+  assert.equal((ui.$("question") as HTMLTextAreaElement).value, "");
+  ui.type("question", "Draft for B");
+  await load("https://example.com/missing", { ...b, error: true, status: "Not found" });
+  assert.equal((ui.$("question") as HTMLTextAreaElement).value, "Draft for B");
+  await load(a.current!.article.url, a);
+  assert.equal((ui.$("question") as HTMLTextAreaElement).value, "Updated draft for A\nwith another line");
+  await load("https://example.com/b", b);
+  assert.equal((ui.$("question") as HTMLTextAreaElement).value, "Draft for B");
+});
+
+test("late answers from a switched article cannot clear either article's draft", async (t) => {
+  const ui = await client(t);
+  ui.type("question", "Question for A");
+  const answer = ui.deferNext();
+  await ui.submit("askForm");
+  const load = ui.deferNext();
+  ui.type("url", "https://example.com/b");
+  await ui.submit("loadForm");
+  const b = fixture();
+  b.current!.article.url = "https://example.com/b";
+  load(b);
+  await ui.settle();
+  ui.type("question", "Question for B");
+  answer(fixture());
+  await ui.settle();
+  assert.equal((ui.$("question") as HTMLTextAreaElement).value, "Question for B");
+  const back = ui.deferNext();
+  ui.type("url", "https://example.com/a");
+  await ui.submit("loadForm");
+  back(fixture());
+  await ui.settle();
+  assert.equal((ui.$("question") as HTMLTextAreaElement).value, "Question for A");
+});
+
+test("repeated submissions while busy do not replace the request or consume the next draft", async (t) => {
+  const ui = await client(t);
+  ui.type("question", "First question");
+  const complete = ui.deferNext();
+  await ui.submit("askForm");
+  ui.type("question", "Next question");
+  await ui.submit("askForm");
+  assert.equal(ui.calls.filter(({ action }) => action === "ask").length, 1);
+  assert.match(ui.$("thread").textContent!, /First question/);
+  complete(fixture());
+  await ui.settle();
+  assert.equal((ui.$("question") as HTMLTextAreaElement).value, "Next question");
+});
+
+test("browser renders nested Markdown, entities, links, lists, tables and heading levels", async (t) => {
+  const snapshot = fixture();
+  snapshot.current!.article.markdown = String.raw`# Annealing
+
+## Details
+
+_Emphasis_ and **[a _nested_ link](https://example.com/path_(one)?a=1&b=2)** &amp; escaped \[brackets\].
+
+3. Third item
+   - Nested item with **strength**
+4. Fourth item
+
+> A quote with
+>
+> another paragraph.
+
+| Name | Value |
+| --- | ---: |
+| _A_ | 42 |
+
+[Reference][ref] and [relative](/docs).
+
+[ref]: https://example.com/reference "A title"
+`;
+  const ui = await client(t, snapshot);
+  const article = ui.$("article");
+  assert.deepEqual([...article.querySelectorAll("h1,h2,h3")].map((h) => [h.tagName, h.textContent]),
+    [["H1", "Annealing"], ["H2", "Details"]]);
+  assert.equal(article.querySelector("p > em")?.textContent, "Emphasis");
+  assert.equal(article.querySelector("strong a em")?.textContent, "nested");
+  assert.equal(article.querySelector("strong a")?.getAttribute("href"), "https://example.com/path_(one)?a=1&b=2");
+  assert.match(article.textContent!, /& escaped \[brackets\]/);
+  assert.equal(article.querySelector("ol")?.start, 3);
+  assert.equal(article.querySelector("ol > li > ul > li > strong")?.textContent, "strength");
+  assert.equal(article.querySelectorAll("blockquote p").length, 2);
+  assert.equal(article.querySelector("table tbody td em")?.textContent, "A");
+  assert.equal((article.querySelectorAll("td")[1] as HTMLElement).style.textAlign, "right");
+  const reference = article.querySelector('a[title="A title"]') as HTMLAnchorElement;
+  assert.equal(reference.href, "https://example.com/reference");
+  assert.equal(reference.rel, "noopener noreferrer");
+  assert.ok(article.querySelector('a[href="https://example.com/docs"]'));
+});
+
+test("the same Markdown renderer formats answers and recaps without interpreting code", async (t) => {
+  const snapshot = fixture();
+  const markdown = '## Details\n\n**[Source](https://example.com)** and _emphasis_.\n\n```html\n<script>alert(1)</script>\n```\n\n`<img src=x>`';
+  snapshot.current!.exchanges[0].answer = markdown;
+  snapshot.current!.summary = markdown;
+  const ui = await client(t, snapshot);
+  const check = (root: HTMLElement) => {
+    assert.equal(root.querySelector("h2")?.textContent, "Details");
+    assert.equal(root.querySelector("strong a")?.textContent, "Source");
+    assert.equal(root.querySelector("em")?.textContent, "emphasis");
+    assert.equal(root.querySelector("pre code")?.textContent, "<script>alert(1)</script>\n");
+    assert.equal(root.querySelector("p code")?.textContent, "<img src=x>");
+    assert.equal(root.querySelector("script,img"), null);
+  };
+  check(ui.$("thread"));
+  ui.type("question", "/recap");
+  await ui.submit("askForm");
+  check(ui.$("article"));
+});
+
+test("Markdown cannot create active HTML, remote images, or unsafe links", async (t) => {
+  const snapshot = fixture();
+  snapshot.current!.article.markdown = String.raw`<script>window.pwned = true</script>
+
+<img src="https://example.com/tracker" onerror="window.pwned = true">
+
+<iframe src="https://example.com"></iframe>
+
+[script](javascript:alert%281%29) [encoded](jav&#x61;script:alert%281%29)
+
+[data](data:text/html,hello) [file](file:///etc/passwd) [credentials](https://user:pass@example.com/)
+
+![chart **description**](https://example.com/tracker.png)
+
+&lt;img src=x onerror=alert(1)&gt;
+
+[safe](https://example.com/?x=%22onclick%3Dalert%281%29 "An innocent title")`;
+  const ui = await client(t, snapshot);
+  const article = ui.$("article");
+  assert.equal(article.querySelector("script,img,iframe,object,embed,svg,style,input"), null);
+  assert.equal((ui.window as unknown as { pwned?: boolean }).pwned, undefined);
+  assert.match(article.textContent!, /\[Image: chart description\]/);
+  assert.match(article.textContent!, /<img src=x onerror=alert\(1\)>/);
+  assert.equal(article.querySelectorAll("a").length, 1);
+  for (const node of article.querySelectorAll("*")) {
+    assert.ok([...node.attributes].every((attr) => !attr.name.startsWith("on")));
+  }
 });
 
 test("browser page restores an attached passage, explains it with Enter and clears it with Escape", async (t) => {
