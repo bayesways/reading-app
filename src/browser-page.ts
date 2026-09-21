@@ -1,3 +1,5 @@
+import { browserMarkdown } from "./browser-markdown.ts";
+
 export function browserPage(nonce: string): string {
   return String.raw`<!doctype html>
 <html lang="en">
@@ -25,6 +27,8 @@ article a,.ex a{color:var(--accent);text-decoration:none}article a:hover,.ex a:h
 article pre,.ex pre{background:#1e1e1e;border:1px solid var(--line);border-radius:8px;padding:16px;overflow:auto;margin:0 0 1.5em}
 article code,.ex code{font:.9em var(--mono);background:#2a2a2a;padding:2px 6px;border-radius:4px}article pre code,.ex pre code{background:none;padding:0}
 article blockquote{border-left:4px solid var(--accent);margin:0 0 1.5em;padding-left:20px;color:var(--muted);font-style:italic}
+article table,.ex table{display:block;max-width:100%;overflow:auto;border-collapse:collapse;margin:0 0 1.5em}
+article th,article td,.ex th,.ex td{border:1px solid var(--line);padding:6px 10px;text-align:left}
 article hr{border:0;border-top:1px solid var(--line);margin:2em 0}
 /* the discussion sits under the article in the same column. no sidebar, no divider. */
 .thread{border-top:1px solid var(--line);margin-top:36px;padding-top:26px}
@@ -63,30 +67,61 @@ article hr{border:0;border-top:1px solid var(--line);margin:2em 0}
 <button class="hint" id="hint" type="button" hidden aria-label="Explain the selected passage">&crarr; explain</button>
 <script nonce="${nonce}">
 'use strict';
+${browserMarkdown()}
 const base=location.pathname.endsWith('/')?location.pathname:location.pathname+'/';
 const $=id=>document.getElementById(id); let state; let selected=''; let mode='article'; let requestId=0; let pending=null; let flash=0; let flashTimer=0; let loading=null;
-const safeUrl=value=>{try{const u=new URL(value);return u.protocol==='http:'||u.protocol==='https:'?u.href:null}catch{return null}};
-function inline(parent,text){const re=/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)|\x60([^\x60]+)\x60|\*\*([^*]+)\*\*|\*([^*]+)\*/g;let at=0,m;while((m=re.exec(text))){parent.append(document.createTextNode(text.slice(at,m.index)));let node;if(m[1]){node=document.createElement('a');node.textContent=m[1];node.href=safeUrl(m[2])||'#';node.target='_blank';node.rel='noopener noreferrer'}else if(m[3]){node=document.createElement('code');node.textContent=m[3]}else{node=document.createElement(m[4]?'strong':'em');node.textContent=m[4]||m[5]}parent.append(node);at=re.lastIndex}parent.append(document.createTextNode(text.slice(at)))}
-function markdown(text,root){root.replaceChildren();const lines=(text||'').split('\n');let i=0;while(i<lines.length){const line=lines[i];if(!line.trim()){i++;continue}if(/^\x60\x60\x60/.test(line)){const code=[];i++;while(i<lines.length&&!/^\x60\x60\x60/.test(lines[i]))code.push(lines[i++]);i++;const pre=document.createElement('pre'),c=document.createElement('code');c.textContent=code.join('\n');pre.append(c);root.append(pre);continue}const heading=line.match(/^(#{1,6})\s+(.+)/);if(heading){const h=document.createElement('h'+Math.min(heading[1].length+1,6));inline(h,heading[2]);root.append(h);i++;continue}if(/^([-*_])(?:\s*\1){2,}\s*$/.test(line)){root.append(document.createElement('hr'));i++;continue}if(/^>\s?/.test(line)){const q=document.createElement('blockquote'),parts=[];while(i<lines.length&&/^>\s?/.test(lines[i]))parts.push(lines[i++].replace(/^>\s?/,''));inline(q,parts.join('\n'));root.append(q);continue}const list=line.match(/^\s*(?:([-+*])|(\d+)\.)\s+(.+)/);if(list){const tag=list[2]?'ol':'ul',el=document.createElement(tag);while(i<lines.length){const item=lines[i].match(/^\s*(?:([-+*])|(\d+)\.)\s+(.+)/);if(!item||Boolean(item[2])!==Boolean(list[2]))break;const li=document.createElement('li');inline(li,item[3]);el.append(li);i++}root.append(el);continue}const parts=[line];i++;while(i<lines.length&&lines[i].trim()&&!/^(#{1,6})\s|^\x60\x60\x60|^>\s?|^\s*(?:[-+*]|\d+\.)\s+/.test(lines[i]))parts.push(lines[i++]);const p=document.createElement('p');inline(p,parts.join(' '));root.append(p)}}
+// This tab's own in-flight request, and the one Escape cancelled. A snapshot can
+// arrive busy because another tab is asking, and that flag never clears on its own.
+let busyId=0; let cancelled=0;
+// Browser drafts are local to this tab, keyed by the server's canonical article URL.
+const drafts = new Map();
+let draftUrl = '';
+function saveDraft() {
+  const text = $('question').value;
+  const previous = drafts.get(draftUrl);
+  if (!previous || previous.text !== text) {
+    drafts.set(draftUrl, { text, revision: (previous?.revision || 0) + 1 });
+  }
+  return drafts.get(draftUrl);
+}
+function restoreDraft(url) {
+  if (url === draftUrl) return;
+  const previous = saveDraft();
+  // Text typed before the first snapshot belongs to no article yet; the first one
+  // to arrive adopts it rather than leaving it stranded under the empty key.
+  if (!draftUrl && url && previous.text) { drafts.set(url, previous); drafts.delete(''); }
+  draftUrl = url;
+  $('question').value = drafts.get(url)?.text || '';
+  grow();
+}
+function clearSubmittedDraft(url, submitted) {
+  // Every edit stores a new record, so holding the submitted one still means
+  // untouched. The first snapshot may have re-keyed a draft typed before it.
+  const key = drafts.get(url) === submitted ? url : draftUrl;
+  if (drafts.get(key) !== submitted) return;
+  drafts.set(key, { text: '', revision: submitted.revision + 1 });
+  if (draftUrl === key) { $('question').value = ''; grow(); }
+}
 async function api(action='',payload,method=payload?'POST':'GET'){const options={method,headers:{'Accept':'application/json'}};if(payload!==undefined){options.headers['Content-Type']='application/json';options.body=JSON.stringify(payload)}const response=await fetch(base+'api/'+action,options);const data=await response.json().catch(()=>({error:'Invalid response from pi.'}));if(!response.ok)throw new Error(data.error||('Request failed: '+response.status));return data}
 function fail(error){state={...state,busy:false,error:true,status:error.message};flashStatus();render()}
 // The title is rendered as the page's own heading; drop it from the body to avoid a duplicate.
 function withoutTitle(text,title){const m=(text||'').match(/^#\s+(.+)\n?/);return m&&m[1].trim().toLowerCase()===(title||'').trim().toLowerCase()?text.slice(m[0].length):text}
 function note(text,extra){const p=document.createElement('p');p.className='label'+(extra?' '+extra:'');p.textContent=text;return p}
-function exchange(number,question,quote,answer){const box=document.createElement('section');box.className='ex'+(answer?'':' waiting');const q=document.createElement('p');q.className='q';const n=document.createElement('span');n.className='n';n.textContent='Q'+number;q.append(n,document.createTextNode(question));box.append(q);if(quote){const blockquote=document.createElement('blockquote');blockquote.textContent=quote;box.append(blockquote)}const body=document.createElement('div');if(answer)markdown(answer,body);else body.append(note('waiting for your model… esc cancels'));box.append(body);return box}
+function exchange(number,question,quote,answer,sourceUrl){const box=document.createElement('section');box.className='ex'+(answer?'':' waiting');const q=document.createElement('p');q.className='q';const n=document.createElement('span');n.className='n';n.textContent='Q'+number;q.append(n,document.createTextNode(question));box.append(q);if(quote){const blockquote=document.createElement('blockquote');blockquote.textContent=quote;box.append(blockquote)}const body=document.createElement('div');if(answer)markdown(answer,body,sourceUrl);else body.append(note('waiting for your model… esc cancels'));box.append(body);return box}
 function footer(){if(!state)return'';if(state.busy||state.error||flash)return state.status;const pages=state.pages.length;return [state.model,'in memory',pages?pages+' page'+(pages===1?'':'s'):'no pages'].join(' · ')}
 function flashStatus(){clearTimeout(flashTimer);flash=1;flashTimer=setTimeout(()=>{flash=0;render()},6000)}
 function render(){if(!state)return;const current=state.current;
+restoreDraft(current?.article.url || '');
 const shown=loading?.url||(current?current.article.url:'');
 if(shown&&document.activeElement!==$('url'))$('url').value=shown;
 const list=$('pages');list.replaceChildren();for(const page of state.pages){const option=document.createElement('option');option.value=page.url;option.label=page.title;list.append(option)}
 const body=$('article');body.replaceChildren();
 if(current){const h1=document.createElement('h1');h1.textContent=current.article.title;body.append(h1);
-if(mode==='summary'){body.append(note('recap · type /article to return to the page','recap'));const recap=document.createElement('div');markdown(current.summary||'*No recap yet. Type /recap to make one.*',recap);body.append(recap)}
-else{if(current.article.warning)body.append(note(current.article.warning));const text=document.createElement('div');markdown(withoutTitle(current.article.markdown,current.article.title),text);body.append(text)}}
+if(mode==='summary'){body.append(note('recap · type /article to return to the page','recap'));const recap=document.createElement('div');markdown(current.summary||'*No recap yet. Type /recap to make one.*',recap,current.article.url);body.append(recap)}
+else{if(current.article.warning)body.append(note(current.article.warning));const text=document.createElement('div');markdown(withoutTitle(current.article.markdown,current.article.title),text,current.article.url);body.append(text)}}
 else body.append(note('paste a url above to begin. nothing is saved; everything lives in this session.'));
 const thread=$('thread');thread.replaceChildren();const exchanges=current?current.exchanges:[];
-exchanges.forEach((item,index)=>thread.append(exchange(index+1,item.question,item.selection,item.answer)));
+exchanges.forEach((item,index)=>thread.append(exchange(index+1,item.question,item.selection,item.answer,current?.article.url)));
 if(pending)thread.append(exchange(exchanges.length+1,pending.question,pending.selection,''));
 thread.hidden=!thread.childElementCount;
 // A passage attached in an earlier tab is still attached here: show it rather than hide the state.
@@ -98,14 +133,16 @@ function grow(){const question=$('question');question.style.height='auto';questi
 // The bar is fixed, so the column has to reserve its height to keep the last lines readable.
 function dockSpace(){document.body.style.paddingBottom=$('dock').offsetHeight+'px'}
 async function refresh(){state=await api('state');render();if(!state.current)$('url').focus()}
-async function run(action,payload,item){const id=++requestId;pending=item||null;
+async function run(action,payload,item){const id=++requestId;busyId=id;pending=item||null;
 try{state={...state,busy:true,error:false,status:action==='summary'?'Summarizing your reading and discussion… Esc cancels.':action==='load'?'Loading article… Esc cancels.':'Asking your pi model… Esc cancels.'};render();if(item)toBottom();
 const result=await api(action,payload);
 if(id===requestId){pending=null;state=result;selected=state.current?.selection||'';render();flashStatus();if(item)toBottom()}
-return !result.error}
-catch(error){if(id===requestId){pending=null;fail(error)}return false}}
-async function explain(){const live=selectionText();if(live){selected=live;showQuote()}if(!selected)return;await run('explain',{selection:selected},{question:'Explain this passage.',selection:selected})}
-async function escape(){if(state?.busy){requestId++;pending=null;loading=null;state=await api('cancel',{});flashStatus();render();return}
+// Loading another page supersedes a request the server still finished; only Escape undoes it.
+return id!==cancelled&&!result.error}
+catch(error){if(id===requestId){pending=null;fail(error)}return false}
+finally{if(busyId===id)busyId=0}}
+async function explain(){if(busyId)return;const live=selectionText();if(live){selected=live;showQuote()}if(!selected)return;await run('explain',{selection:selected},{question:'Explain this passage.',selection:selected})}
+async function escape(){if(state?.busy||busyId){cancelled=requestId;requestId++;busyId=0;pending=null;loading=null;state=await api('cancel',{});flashStatus();render();return}
 if(selected){selected='';$('hint').hidden=true;getSelection()?.removeAllRanges();state=await api('select',{selection:''});render();return}
 if(mode==='summary'){mode='article';render()}}
 // run('load') restores the selection from the snapshot it returns, so nothing is cleared here.
@@ -133,11 +170,14 @@ $('url').addEventListener('input',event=>{if(event.inputType==='insertReplacemen
 $('url').addEventListener('change',reopenSaved);
 $('askForm').addEventListener('submit',event=>{event.preventDefault();const value=$('question').value.trim();if(!value)return;
 const command=value.toLowerCase();
-if(command==='/recap'||command==='/summary'||command==='/summarize'){$('question').value='';grow();mode='summary';run('summary',{});return}
-if(command==='/article'||command==='/read'){$('question').value='';grow();mode='article';render();return}
+if(command==='/article'||command==='/read'){$('question').value='';saveDraft();grow();mode='article';render();return}
+if(command==='/recap'||command==='/summary'||command==='/summarize'){if(busyId)return;$('question').value='';saveDraft();grow();mode='summary';run('summary',{});return}
 if(command.charAt(0)==='/'){state={...state,error:true,status:'Unknown command. Type /recap for a recap, /article to return to the page.'};flashStatus();render();return}
-run('ask',{question:value,selection:selected},{question:value,selection:selected}).then(sent=>{if(sent){$('question').value='';grow()}})});
-$('question').addEventListener('input',grow);
+if(busyId)return;
+const url=draftUrl;
+const submitted=saveDraft();
+run('ask',{question:value,selection:selected},{question:value,selection:selected}).then(sent=>{if(sent)clearSubmittedDraft(url,submitted)})});
+$('question').addEventListener('input',()=>{saveDraft();grow()});
 $('question').addEventListener('keydown',event=>{if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();$('askForm').requestSubmit()}});
 function articleSelection(){
   const selection=getSelection();
@@ -175,7 +215,7 @@ addEventListener('keydown',event=>{const typing=event.target===$('question')||ev
 if(event.key==='Escape'){event.preventDefault();escape().catch(fail);return}
 if(typing||event.metaKey||event.ctrlKey||event.altKey)return;
 if(event.key==='Enter'){if(selected){event.preventDefault();explain().catch(fail)}return}
-if(event.key.length===1&&event.key!==' '){event.preventDefault();const question=$('question');question.focus();question.value+=event.key;grow()}});
+if(event.key.length===1&&event.key!==' '){event.preventDefault();const question=$('question');question.focus();question.value+=event.key;saveDraft();grow()}});
 dockSpace();
 refresh().catch(fail);
 </script>
