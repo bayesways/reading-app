@@ -1,26 +1,40 @@
 # Pi Terminal Reader
 
-Read web articles in pi's terminal UI or a local browser workspace, then ask questions grounded in the article. Articles and discussions stay in memory for the current pi session.
+Read web articles in a local browser workspace, then ask questions grounded in the article. The package includes its own command and can also run as a pi extension. Articles and discussions stay in memory for the current process.
 
 ## Requirements
 
 - Node.js 22+
-- pi 0.85.1+
+
+## Install
 
 ```sh
-npm install
+npm install --global pi-terminal-reader
 ```
 
-## Configure a model
+From a downloaded checkout, use `npm install` followed by `npm link`, or run `npm start` without linking it globally.
 
-The reader uses pi's existing model configuration and credentials. Log in and choose a model in pi first:
+## Start the reader
 
-```text
-/login
-/model
+```sh
+pi-reader
 ```
 
-By default, [`reader.config.json`](reader.config.json) inherits that selected model:
+The command opens an empty reader. Paste an article URL into the top line when you are ready; no URL argument or example link is required. Passing a URL remains optional:
+
+```sh
+pi-reader https://example.com/article
+```
+
+Use `--no-open` to print the local URL without opening a browser, and `--config PATH` to select a config file. The process stays alive until you press `Ctrl+C`.
+
+## Connect a model
+
+Use **connect provider** in the reader to sign in with a provider or enter an API key, then choose the model in the model menu. OAuth, device-code, manual-code, and API-key prompts are handled in the local reader. You do not need to open pi first.
+
+The package uses Pi's model runtime in the background and stores credentials in Pi's local credential store. If Pi is already configured, the reader recognizes those credentials and initially selects Pi's default model when it is available. Selecting another model in the reader affects the current reader process and does not change Pi's default.
+
+By default, [`reader.config.json`](reader.config.json) inherits Pi's selected model or uses the first available model:
 
 ```json
 {
@@ -29,7 +43,7 @@ By default, [`reader.config.json`](reader.config.json) inherits that selected mo
 }
 ```
 
-To always use a particular model for reader requests, set `defaultModel` to an identifier shown by `pi --list-models`. The provider name must match exactly. For example, a Codex model uses `openai-codex`, not `openai`:
+To prefer a particular model for reader requests, set `defaultModel` to its `provider/model` identifier. The provider name must match exactly. For example, a Codex model uses `openai-codex`:
 
 ```json
 {
@@ -38,7 +52,7 @@ To always use a particular model for reader requests, set `defaultModel` to an i
 }
 ```
 
-Set `defaultThinkingLevel` to `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, or `null` to inherit pi's setting. Set `PI_READER_CONFIG=/path/to/config.json` to use another config file.
+Set `defaultThinkingLevel` to `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, or `null` to inherit Pi's setting. Set `PI_READER_CONFIG=/path/to/config.json` to use another config file.
 
 ## Use from pi
 
@@ -56,17 +70,7 @@ Then run one of these commands:
 /reader --browser-stop                    # stop the browser server
 ```
 
-The browser server listens only on a random `127.0.0.1` URL. Keep pi running while using it. To apply a model/configuration change, stop and reopen the browser reader.
-
-## Run the browser reader directly
-
-```sh
-npm start -- https://example.com/article
-# or
-./bin/pi-reader.mjs https://example.com/article
-```
-
-Use `--no-open` to print the local URL without opening a browser, and `--config PATH` to select a config file.
+The browser server listens only on a random, capability-protected `127.0.0.1` URL. Keep Pi running while using extension mode.
 
 ## Controls
 
@@ -93,9 +97,9 @@ Start pi with `pi --tui-mode fullscreen` for mouse selection in the terminal.
 
 ## Notes
 
-- Loading an article does not require model credentials; questions and recaps do.
+- Starting the reader and loading an article do not require model credentials; questions and recaps do.
 - The reader sends the extracted article, selected passage, and prior Q&A for that URL to the selected model provider.
-- Content is held in memory only and is cleared when the pi session ends, reloads, or the browser reader is stopped.
+- Provider credentials are stored by Pi on the local computer. Article content, discussions, and the reader's model choice are held in memory and clear when the process ends.
 - Reader extraction supports ordinary HTTP(S) pages. JavaScript-only pages, PDFs, paywalls, and login-required pages may not work.
 
 ## Development

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Standalone pi-reader smoke test; local article and fake auth, no model call."""
+"""Standalone pi-reader smoke test; no initial URL or model setup required."""
 import http.server
 import json
 import os
@@ -39,14 +39,13 @@ def main():
             root = Path(directory)
             config = root / "reader.json"
             config.write_text(json.dumps({
-                "defaultModel": "openai/gpt-5.2",
-                "defaultThinkingLevel": "low",
+                "defaultModel": None,
+                "defaultThinkingLevel": "medium",
             }))
-            env = dict(os.environ, PI_CODING_AGENT_DIR=str(root / "pi"), OPENAI_API_KEY="fake-test-key",
-                    PI_OFFLINE="1", PI_TELEMETRY="0")
+            env = dict(os.environ, PI_CODING_AGENT_DIR=str(root / "pi"), PI_OFFLINE="1", PI_TELEMETRY="0")
             article = f"http://127.0.0.1:{server.server_port}/article"
             process = subprocess.Popen([
-                str(ROOT / "bin/pi-reader.mjs"), "--no-open", "--config", str(config), article,
+                str(ROOT / "bin/pi-reader.mjs"), "--no-open", "--config", str(config),
             ], cwd=ROOT, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
             output = ""
             deadline = time.monotonic() + 20
@@ -61,7 +60,14 @@ def main():
             url = match.group()
             with urllib.request.urlopen(url + "api/state", timeout=5) as response:
                 state = json.load(response)
-            assert state["model"] == "openai/gpt-5.2 · thinking:low"
+            assert "current" not in state
+            assert "assistant" in state
+            request = urllib.request.Request(
+                url + "api/load", data=json.dumps({"url": article}).encode(), method="POST",
+                headers={"Content-Type": "application/json"},
+            )
+            with urllib.request.urlopen(request, timeout=5) as response:
+                state = json.load(response)
             assert state["current"]["article"]["title"] == "Standalone smoke fixture"
             process.send_signal(signal.SIGINT)
             assert process.wait(timeout=10) == 0, output
@@ -71,7 +77,7 @@ def main():
             except urllib.error.URLError:
                 pass
             assert not list(root.rglob("*.jsonl")), "Standalone reader created a pi session"
-            print("PASS (standalone): config model/thinking, article API, clean shutdown; no saved session")
+            print("PASS (standalone): starts empty, loads an article, shuts down cleanly; no saved session")
     finally:
         if process is not None and process.poll() is None:
             process.kill()

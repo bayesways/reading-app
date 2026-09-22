@@ -3,7 +3,7 @@ import { randomBytes, timingSafeEqual } from "node:crypto";
 import { spawn } from "node:child_process";
 import { cleanText } from "./article.ts";
 import { browserPage } from "./browser-page.ts";
-import { ReaderState } from "./reader.ts";
+import { ReaderState, type Answer } from "./reader.ts";
 
 const MAX_API_BYTES = 64 * 1024;
 const MAX_QUESTION_CHARS = 10_000;
@@ -12,6 +12,7 @@ const MAX_SELECTION_CHARS = 20_000;
 /** The page's wire contract. Spelled out, not derived from Reading, so nothing internal is served by accident. */
 export interface BrowserSnapshot {
   model: string;
+  assistant?: AssistantSnapshot;
   status: string;
   error: boolean;
   busy: boolean;
@@ -25,8 +26,50 @@ export interface BrowserSnapshot {
   };
 }
 
+export interface AssistantSnapshot {
+  selected?: { value: string; provider: string; id: string; label: string; thinkingLevel: string };
+  models: Array<{ value: string; provider: string; providerName: string; id: string; name: string; label: string }>;
+  providers: Array<{
+    id: string; name: string; configured: boolean;
+    methods: Array<{ type: "api_key" | "oauth"; label: string }>;
+  }>;
+  auth?: {
+    providerId: string;
+    providerName: string;
+    method: "api_key" | "oauth";
+    methodLabel: string;
+    status: "running" | "success" | "error";
+    message: string;
+    authUrl?: string;
+    deviceCode?: string;
+    links?: Array<{ url: string; label?: string }>;
+    prompt?: {
+      id: number;
+      type: "text" | "secret" | "select" | "manual_code";
+      message: string;
+      placeholder?: string;
+      options?: Array<{ id: string; label: string; description?: string }>;
+    };
+  };
+  error?: string;
+}
+
+export interface BrowserAssistant {
+  answer: Answer;
+  snapshot(): AssistantSnapshot;
+  selectModel(value: string): Promise<void>;
+  startLogin(providerId: string, type: "api_key" | "oauth"): void;
+  respondToLogin(promptId: number, value: string): void;
+  cancelLogin(): void;
+  dismissLogin(): void;
+  dispose?(): void;
+}
+
 export interface BrowserOpenResult { url: string; launched: boolean; error?: string }
-export interface BrowserReaderOptions { launch?: (url: string) => Promise<void> | void }
+export interface BrowserReaderOptions {
+  launch?: (url: string) => Promise<void> | void;
+  assistant?: BrowserAssistant;
+}
 
 function browserStatus(status: string): string {
   return status
@@ -36,10 +79,16 @@ function browserStatus(status: string): string {
     .replace("click/drag in fullscreen, or press v in the article.", "select text in the article first.");
 }
 
-function snapshot(state: ReaderState, model: string): BrowserSnapshot {
+function snapshot(state: ReaderState, model: string, assistant?: BrowserAssistant): BrowserSnapshot {
   const current = state.current;
+  const assistantSnapshot = assistant?.snapshot();
+  const modelLabel = assistantSnapshot?.selected
+    ? `${assistantSnapshot.selected.value} · thinking:${assistantSnapshot.selected.thinkingLevel}`
+    : assistant ? "No model selected" : model;
   return {
-    model: cleanText(model), status: browserStatus(state.status), error: state.error, busy: state.busy,
+    model: cleanText(modelLabel),
+    ...(assistantSnapshot ? { assistant: assistantSnapshot } : {}),
+    status: browserStatus(state.status), error: state.error, busy: state.busy,
     showingSummary: state.showingSummary,
     pages: [...state.readings.values()].map(({ article }) => ({ url: article.url, title: article.title })),
     ...(current ? { current: {
@@ -169,6 +218,7 @@ export class BrowserReader {
 
   async dispose(): Promise<void> {
     this.state.clear();
+    this.options.assistant?.dispose?.();
     await this.stop();
   }
 
@@ -211,7 +261,7 @@ export class BrowserReader {
       if (!parsed.pathname.startsWith(apiPrefix)) { sendEmpty(response, 404); return; }
       const action = parsed.pathname.slice(apiPrefix.length);
       if (request.method === "GET" && action === "state") {
-        sendJson(response, 200, snapshot(this.state, this.modelLabel));
+        sendJson(response, 200, snapshot(this.state, this.modelLabel, this.options.assistant));
         return;
       }
       if (request.method !== "POST") { sendJson(response, 405, { error: "Method not allowed." }); return; }
@@ -233,10 +283,29 @@ export class BrowserReader {
         await this.state.ask("", "summary");
       } else if (action === "cancel") {
         this.state.cancel();
+      } else if (action === "model") {
+        if (!this.options.assistant) throw new Error("Model selection is not available in this reader session.");
+        if (this.state.busy) throw new Error("Wait for the current answer or cancel it before changing models.");
+        await this.options.assistant.selectModel(requiredText(body, "model", 1024));
+      } else if (action === "auth/start") {
+        if (!this.options.assistant) throw new Error("Provider setup is not available in this reader session.");
+        const type = requiredText(body, "type", 16);
+        if (type !== "api_key" && type !== "oauth") throw new Error("Unknown sign-in method.");
+        this.options.assistant.startLogin(requiredText(body, "provider", 256), type);
+      } else if (action === "auth/respond") {
+        if (!this.options.assistant) throw new Error("Provider setup is not available in this reader session.");
+        if (!Number.isSafeInteger(body.promptId) || (body.promptId as number) < 1) throw new Error("promptId must be a positive integer.");
+        this.options.assistant.respondToLogin(body.promptId as number, requiredText(body, "value", 32_768));
+      } else if (action === "auth/cancel") {
+        if (!this.options.assistant) throw new Error("Provider setup is not available in this reader session.");
+        this.options.assistant.cancelLogin();
+      } else if (action === "auth/dismiss") {
+        if (!this.options.assistant) throw new Error("Provider setup is not available in this reader session.");
+        this.options.assistant.dismissLogin();
       } else {
         sendJson(response, 404, { error: "Unknown API action." }); return;
       }
-      sendJson(response, 200, snapshot(this.state, this.modelLabel));
+      sendJson(response, 200, snapshot(this.state, this.modelLabel, this.options.assistant));
     } catch (error) {
       sendJson(response, 400, { error: cleanText((error as Error).message || "Invalid request.") });
     }
