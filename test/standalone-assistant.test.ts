@@ -60,9 +60,10 @@ test("standalone assistant starts without credentials and completes provider set
   const ready = assistant.snapshot();
   assert.equal(submitted, "local-test-key");
   assert.equal(ready.auth?.status, "success");
-  assert.equal(ready.selected?.value, "example/reader-model");
-  assert.equal(ready.selected?.thinkingLevel, "high");
+  assert.equal(ready.selected, undefined);
   assert.equal(ready.models[0].label, "reader-model · Example AI");
+  await assistant.selectModel("example/reader-model");
+  assert.equal(assistant.snapshot().selected?.thinkingLevel, "high");
 });
 
 test("standalone assistant prefers an available configured model and changes models per process", async () => {
@@ -84,4 +85,32 @@ test("standalone assistant prefers an available configured model and changes mod
   await assistant.selectModel("example/first");
   assert.equal(assistant.snapshot().selected?.value, "example/first");
   await assert.rejects(assistant.selectModel("example/missing"), /not available/);
+});
+
+test("standalone assistant never replaces an explicit model with the provider's first catalog entry", async () => {
+  const spark = model("openai-codex", "gpt-5.3-codex-spark");
+  const terra = model("openai-codex", "gpt-5.6-terra");
+  const provider = {
+    id: "openai-codex", name: "OpenAI Codex",
+    auth: { oauth: { name: "ChatGPT", login: async () => ({ type: "oauth", refresh: "r", access: "a", expires: Date.now() + 60_000 }) } },
+  } as unknown as Provider;
+  let interaction: AuthInteraction | undefined;
+  const runtime = {
+    getProviders: () => [provider], getProvider: () => provider,
+    getModel: () => undefined, getAvailable: async () => [spark, terra],
+    login: async (_providerId: string, _type: string, next: AuthInteraction) => {
+      interaction = next;
+      return provider.auth.oauth!.login(next as never);
+    },
+    refresh: async () => ({ aborted: false, errors: new Map() }),
+    completeSimple: async () => { throw new Error("not called"); },
+  };
+  const assistant = new StandaloneAssistant(runtime as never, settings, { defaultModel: null, defaultThinkingLevel: "medium" });
+  await assistant.initialize();
+  assert.equal(assistant.snapshot().selected, undefined, "catalog order must not auto-select Spark");
+  await assistant.selectModel("openai-codex/gpt-5.6-terra");
+  assistant.startLogin("openai-codex", "oauth");
+  while (assistant.snapshot().auth?.status === "running") await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.ok(interaction);
+  assert.equal(assistant.snapshot().selected?.value, "openai-codex/gpt-5.6-terra");
 });

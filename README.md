@@ -34,7 +34,7 @@ Use **connect provider** in the reader to sign in with a provider or enter an AP
 
 The package uses Pi's model runtime in the background and stores credentials in Pi's local credential store. If Pi is already configured, the reader recognizes those credentials and initially selects Pi's default model when it is available. Selecting another model in the reader affects the current reader process and does not change Pi's default.
 
-By default, [`reader.config.json`](reader.config.json) inherits Pi's selected model or uses the first available model:
+By default, [`reader.config.json`](reader.config.json) inherits Pi's selected model when it is available. Otherwise, choose a model in the reader:
 
 ```json
 {

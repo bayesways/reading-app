@@ -68,7 +68,6 @@ export class StandaloneAssistant implements BrowserAssistant {
     await this.refreshAvailable();
     const preferred = this.config.defaultModel ?? this.piDefault();
     if (preferred) this.selected = this.available.find((entry) => modelValue(entry) === preferred);
-    this.selected ??= this.available[0];
     this.updateThinkingLevel();
   }
 
@@ -257,18 +256,22 @@ export class StandaloneAssistant implements BrowserAssistant {
         providers: [provider.id], allowNetwork: true,
         signal: AbortSignal.any([controller.signal, AbortSignal.timeout(20_000)]),
       });
+      const selectedValue = this.selected ? modelValue(this.selected) : undefined;
       await this.refreshAvailable(provider.id);
       const providerModels = this.available.filter((model) => model.provider === provider.id);
       const preferred = this.config.defaultModel ?? this.piDefault();
       const preferredModel = providerModels.find((model) => modelValue(model) === preferred);
-      if (!this.selected || this.selected.provider === provider.id) {
-        this.selected = preferredModel ?? providerModels[0] ?? this.selected;
-      }
+      // A credential refresh must never silently replace a choice the user made in the page.
+      // Catalog order is not a compatibility signal: the first Codex model, for example, can
+      // be unavailable to the account that just authenticated.
+      this.selected = this.available.find((model) => modelValue(model) === selectedValue) ?? preferredModel;
       this.updateThinkingLevel();
       this.auth = {
         ...this.auth!, status: "success", prompt: undefined,
         message: providerModels.length
-          ? `${provider.name} is connected. Choose a model or start reading.`
+          ? this.selected
+            ? `${provider.name} is connected. Your selected model is ready.`
+            : `${provider.name} is connected. Choose a model to start asking questions.`
           : `${provider.name} is connected, but it did not return any models.`,
       };
     } catch (error) {
