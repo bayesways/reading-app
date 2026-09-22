@@ -1,7 +1,7 @@
 {
   "name": "pi-terminal-reader",
-  "version": "0.1.0",
-  "description": "An in-memory terminal and local-browser article reader with per-URL Q&A for pi",
+  "version": "0.2.0",
+  "description": "A standalone local article reader with model-assisted Q&A, also available as a pi extension",
   "type": "module",
   "keywords": ["pi-package"],
   "files": ["src", "bin", "README.md", "reader.config.json"],
@@ -14,21 +14,16 @@
   },
   "engines": { "node": ">=22" },
   "dependencies": {
+    "@earendil-works/pi-ai": "^0.85.1",
+    "@earendil-works/pi-coding-agent": "^0.85.1",
+    "@earendil-works/pi-tui": "^0.85.1",
     "@mozilla/readability": "^0.6.0",
     "jsdom": "^26.1.0",
     "markdown-it": "^15.0.2",
     "tsx": "^4.20.0",
     "turndown": "^7.2.0"
   },
-  "peerDependencies": {
-    "@earendil-works/pi-ai": "*",
-    "@earendil-works/pi-coding-agent": "*",
-    "@earendil-works/pi-tui": "*"
-  },
   "devDependencies": {
-    "@earendil-works/pi-ai": "^0.85.1",
-    "@earendil-works/pi-coding-agent": "^0.85.1",
-    "@earendil-works/pi-tui": "^0.85.1",
     "@types/jsdom": "^21.1.7",
     "@types/node": "^22.15.0",
     "@types/turndown": "^5.0.5",

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { Model } from "@earendil-works/pi-ai";
-import { parseCliArgs, resolveStandaloneSelection } from "../src/cli.ts";
+import { parseCliArgs } from "../src/cli.ts";
 import {
   loadReaderConfig,
   parseModelId,
@@ -68,33 +68,6 @@ test("registry model requests receive native thinking controls", () => {
   assert.deepEqual(registryThinkingOptions(google, "medium", 12_288, 8192).thinking, { enabled: true, level: "MEDIUM" });
   const openai = model("openai", "gpt-test");
   assert.equal(registryThinkingOptions(openai, "xhigh", 20_480, 16_384).reasoningEffort, "high"); // no xhigh map => clamp
-});
-
-test("standalone CLI uses repo config first, then pi defaults", async () => {
-  const configured = model("anthropic", "configured");
-  const piDefault = model("openai", "default");
-  const available = model("google", "available");
-  const models = {
-    getModel: (provider: string, id: string) => [configured, piDefault].find((entry) => entry.provider === provider && entry.id === id),
-    getAvailable: async () => [available],
-  };
-  const settings = {
-    getDefaultProvider: () => "openai",
-    getDefaultModel: () => "default",
-    getDefaultThinkingLevel: () => "low" as const,
-    getModelThinkingLevel: () => undefined,
-  };
-  let selected = await resolveStandaloneSelection({ defaultModel: "anthropic/configured", defaultThinkingLevel: "high" }, models, settings);
-  assert.equal(selected.model, configured);
-  assert.equal(selected.thinkingLevel, "high");
-  selected = await resolveStandaloneSelection({ defaultModel: null, defaultThinkingLevel: null }, models, settings);
-  assert.equal(selected.model, piDefault);
-  assert.equal(selected.thinkingLevel, "low");
-  selected = await resolveStandaloneSelection({ defaultModel: null, defaultThinkingLevel: "medium" }, {
-    getModel: () => undefined, getAvailable: async () => [available],
-  }, { ...settings, getDefaultProvider: () => undefined, getDefaultModel: () => undefined });
-  assert.equal(selected.model, available);
-  assert.equal(selected.thinkingLevel, "medium");
 });
 
 test("standalone CLI argument parsing supports direct URLs and headless launch", () => {

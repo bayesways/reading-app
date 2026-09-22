@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
 import vm from "node:vm";
 import { JSDOM, VirtualConsole } from "jsdom";
-import { BrowserReader, parseReaderCommand, type BrowserSnapshot } from "../src/browser.ts";
+import { BrowserReader, parseReaderCommand, type BrowserAssistant, type BrowserSnapshot } from "../src/browser.ts";
 import { browserPage } from "../src/browser-page.ts";
 import { ReaderState } from "../src/reader.ts";
 
@@ -166,6 +166,47 @@ test("browser API validates methods, content types, body size and input lengths"
   assert.equal((await post(base, "unknown", {})).status, 404);
 });
 
+test("browser API changes standalone models and carries provider login prompts", async (t) => {
+  let selected = "example/first";
+  let auth: ReturnType<BrowserAssistant["snapshot"]>["auth"];
+  const assistant: BrowserAssistant = {
+    answer: async () => "answer",
+    snapshot: () => ({
+      selected: { value: selected, provider: "example", id: selected.split("/")[1], label: selected, thinkingLevel: "medium" },
+      models: ["first", "second"].map((id) => ({
+        value: `example/${id}`, provider: "example", providerName: "Example", id, name: id, label: `${id} · Example`,
+      })),
+      providers: [{ id: "example", name: "Example", configured: true, methods: [{ type: "api_key", label: "API key" }] }],
+      ...(auth ? { auth } : {}),
+    }),
+    selectModel: async (value) => { selected = value; },
+    startLogin: (providerId, method) => {
+      auth = {
+        providerId, providerName: "Example", method, methodLabel: "API key", status: "running", message: "Enter key",
+        prompt: { id: 7, type: "secret", message: "Paste key" },
+      };
+    },
+    respondToLogin: (promptId, value) => {
+      assert.equal(promptId, 7);
+      assert.equal(value, "test-key");
+      auth = { ...auth!, status: "success", message: "Connected", prompt: undefined };
+    },
+    cancelLogin: () => { auth = { ...auth!, status: "error", message: "Cancelled", prompt: undefined }; },
+    dismissLogin: () => { auth = undefined; },
+  };
+  const reader = new BrowserReader(new ReaderState(assistant.answer, article), "", { launch: () => {}, assistant });
+  t.after(() => reader.dispose());
+  const base = await reader.start();
+
+  let state = await (await post(base, "model", { model: "example/second" })).json() as BrowserSnapshot;
+  assert.equal(state.assistant?.selected?.value, "example/second");
+  state = await (await post(base, "auth/start", { provider: "example", type: "api_key" })).json() as BrowserSnapshot;
+  assert.equal(state.assistant?.auth?.prompt?.type, "secret");
+  state = await (await post(base, "auth/respond", { promptId: 7, value: "test-key" })).json() as BrowserSnapshot;
+  assert.equal(state.assistant?.auth?.status, "success");
+  assert.equal((await post(base, "auth/start", { provider: "example", type: "password" })).status, 400);
+});
+
 test("stopping rotates the capability and disposal clears all in-memory data", async () => {
   const state = new ReaderState(async () => "answer", article);
   const opened: string[] = [];
@@ -261,13 +302,12 @@ async function client(t: TestContext, snapshot = fixture(), holdFirstResponse = 
   };
 }
 
-test("browser page renders one column with no dropdowns or status bar", async (t) => {
+test("browser page keeps optional assistant controls out of extension sessions", async (t) => {
   const page = browserPage("test-nonce");
-  assert.doesNotMatch(page, /<select/i); // Every other action is a keystroke or the url/ask line.
   const ui = await client(t);
-  assert.deepEqual([...ui.window.document.querySelectorAll("button")].map((node) => node.id), ["hint"]);
   const document = ui.window.document;
   assert.equal(ui.calls[0].action, "state");
+  assert.equal(document.getElementById("assistant")!.hidden, true);
   assert.equal(document.querySelector("h1")?.textContent, "Annealing");
   assert.doesNotMatch(document.querySelector("article")!.textContent!, /^Annealing\s*Annealing/); // Title is not repeated.
   assert.match(document.getElementById("thread")!.textContent!, /Q1Why\?/);
@@ -280,6 +320,65 @@ test("browser page renders one column with no dropdowns or status bar", async (t
   assert.ok(dock.contains(document.getElementById("question")!) && dock.contains(document.getElementById("foot")!));
   assert.match(page, /\.dock\{[^}]*position:fixed[^}]*bottom:0/);
   assert.match(document.body.style.paddingBottom, /px$/); // The column reserves the bar's height.
+});
+
+test("browser page selects models and starts provider setup", async (t) => {
+  const snapshot = fixture();
+  snapshot.assistant = {
+    selected: { value: "example/first", provider: "example", id: "first", label: "First · Example", thinkingLevel: "medium" },
+    models: [
+      { value: "example/first", provider: "example", providerName: "Example", id: "first", name: "First", label: "First · Example" },
+      { value: "example/second", provider: "example", providerName: "Example", id: "second", name: "Second", label: "Second · Example" },
+    ],
+    providers: [{ id: "example", name: "Example", configured: true, methods: [{ type: "oauth", label: "Sign in" }] }],
+  };
+  const ui = await client(t, snapshot);
+  assert.equal(ui.$("assistant").hidden, false);
+  assert.equal((ui.$("model") as HTMLSelectElement).value, "example/first");
+
+  const select = ui.$("model") as HTMLSelectElement;
+  select.value = "example/second";
+  select.dispatchEvent(new ui.window.Event("change", { bubbles: true }));
+  await ui.settle();
+  assert.deepEqual(ui.calls.at(-1), { action: "model", body: { model: "example/second" } });
+
+  ui.$("providerToggle").click();
+  assert.equal(ui.$("setup").hidden, false);
+  snapshot.assistant.auth = {
+    providerId: "example", providerName: "Example", method: "oauth", methodLabel: "Sign in",
+    status: "running", message: "Enter the code", prompt: { id: 3, type: "manual_code", message: "Authorization code" },
+  };
+  ui.$("connect").click();
+  await ui.settle();
+  assert.deepEqual(ui.calls.at(-1), { action: "auth/start", body: { provider: "example", type: "oauth" } });
+  ui.type("authValue", "partly-typed-code");
+  select.value = "example/first";
+  select.dispatchEvent(new ui.window.Event("change", { bubbles: true }));
+  await ui.settle();
+  assert.equal((ui.$("authValue") as HTMLInputElement).value, "partly-typed-code");
+});
+
+test("browser setup distinguishes OpenAI API keys from Codex subscriptions", async (t) => {
+  const snapshot = fixture();
+  snapshot.assistant = {
+    selected: {
+      value: "openai-codex/gpt-5.6-terra", provider: "openai-codex", id: "gpt-5.6-terra",
+      label: "GPT-5.6 Terra · OpenAI Codex", thinkingLevel: "medium",
+    },
+    models: [{
+      value: "openai-codex/gpt-5.6-terra", provider: "openai-codex", providerName: "OpenAI Codex",
+      id: "gpt-5.6-terra", name: "GPT-5.6 Terra", label: "GPT-5.6 Terra · OpenAI Codex",
+    }],
+    providers: [
+      { id: "openai", name: "OpenAI", configured: false, methods: [{ type: "api_key", label: "OpenAI API key" }] },
+      { id: "openai-codex", name: "OpenAI Codex", configured: false, methods: [{ type: "oauth", label: "OpenAI (ChatGPT Plus/Pro)" }] },
+    ],
+  };
+  const ui = await client(t, snapshot);
+  assert.equal((ui.$("provider") as HTMLSelectElement).value, "openai-codex");
+  assert.equal((ui.$("authMethod") as HTMLSelectElement).value, "oauth");
+  assert.match(ui.$("provider").textContent!, /OpenAI — OpenAI API key/);
+  assert.match(ui.$("provider").textContent!, /OpenAI Codex — OpenAI \(ChatGPT Plus\/Pro\)/);
 });
 
 test("browser page asks and runs /recap and /article from the ask line", async (t) => {
