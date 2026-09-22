@@ -358,6 +358,29 @@ test("browser page selects models and starts provider setup", async (t) => {
   assert.equal((ui.$("authValue") as HTMLInputElement).value, "partly-typed-code");
 });
 
+test("browser setup distinguishes OpenAI API keys from Codex subscriptions", async (t) => {
+  const snapshot = fixture();
+  snapshot.assistant = {
+    selected: {
+      value: "openai-codex/gpt-5.6-terra", provider: "openai-codex", id: "gpt-5.6-terra",
+      label: "GPT-5.6 Terra · OpenAI Codex", thinkingLevel: "medium",
+    },
+    models: [{
+      value: "openai-codex/gpt-5.6-terra", provider: "openai-codex", providerName: "OpenAI Codex",
+      id: "gpt-5.6-terra", name: "GPT-5.6 Terra", label: "GPT-5.6 Terra · OpenAI Codex",
+    }],
+    providers: [
+      { id: "openai", name: "OpenAI", configured: false, methods: [{ type: "api_key", label: "OpenAI API key" }] },
+      { id: "openai-codex", name: "OpenAI Codex", configured: false, methods: [{ type: "oauth", label: "OpenAI (ChatGPT Plus/Pro)" }] },
+    ],
+  };
+  const ui = await client(t, snapshot);
+  assert.equal((ui.$("provider") as HTMLSelectElement).value, "openai-codex");
+  assert.equal((ui.$("authMethod") as HTMLSelectElement).value, "oauth");
+  assert.match(ui.$("provider").textContent!, /OpenAI — OpenAI API key/);
+  assert.match(ui.$("provider").textContent!, /OpenAI Codex — OpenAI \(ChatGPT Plus\/Pro\)/);
+});
+
 test("browser page asks and runs /recap and /article from the ask line", async (t) => {
   const ui = await client(t);
   ui.type("question", "What is annealing?");

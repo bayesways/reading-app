@@ -32,6 +32,8 @@ Use `--no-open` to print the local URL without opening a browser, and `--config 
 
 Use **connect provider** in the reader to sign in with a provider or enter an API key, then choose the model in the model menu. OAuth, device-code, manual-code, and API-key prompts are handled in the local reader. You do not need to open pi first.
 
+For GPT models through a ChatGPT subscription, choose **OpenAI Codex — OpenAI (ChatGPT Plus/Pro)**. The separate **OpenAI — OpenAI API key** option uses API billing instead.
+
 The package uses Pi's model runtime in the background and stores credentials in Pi's local credential store. If Pi is already configured, the reader recognizes those credentials and initially selects Pi's default model when it is available. Selecting another model in the reader affects the current reader process and does not change Pi's default.
 
 By default, [`reader.config.json`](reader.config.json) inherits Pi's selected model when it is available. Otherwise, choose a model in the reader:
