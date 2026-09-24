@@ -18,13 +18,14 @@ input::placeholder,textarea::placeholder{color:var(--faint)}
 /* the only chrome: a wordmark and a bare url line. enter loads, no button. */
 .top{display:flex;align-items:baseline;gap:16px;border-bottom:1px solid var(--line);padding-bottom:14px;margin-bottom:44px}
 .mark{flex:none;font-size:.95rem;font-weight:600;letter-spacing:-.3px}
-.top form{flex:1;min-width:0}.field{position:relative;min-width:0}.field input,.field textarea{padding-left:12px}
-#url{font:.82rem/1.7 var(--mono);color:var(--muted);text-overflow:ellipsis;caret-color:var(--text)}#url:focus{color:var(--text)}
-.field-cursor{position:absolute;left:0;top:50%;width:7px;height:1.3em;transform:translateY(-50%);background:var(--text);opacity:0;pointer-events:none}
-.field:focus-within input:placeholder-shown+.field-cursor,.field:focus-within textarea:placeholder-shown+.field-cursor{opacity:1;animation:cursor-blink 1s steps(1,end) infinite}
-.ask-field .field-cursor{top:.85em;background:var(--accent)}
+.top form{flex:1;min-width:0}.field{position:relative;min-width:0}.field input,.field textarea{caret-color:transparent}
+.field:focus-within input:placeholder-shown,.field:focus-within textarea:placeholder-shown{text-indent:12px}
+#url{font:.82rem/1.7 var(--mono);color:var(--muted);text-overflow:ellipsis}#url:focus{color:var(--text)}
+.field-cursor{position:absolute;left:0;top:0;width:8px;height:1.3em;background:var(--text);opacity:0;pointer-events:none;z-index:1}
+.field.cursor-active .field-cursor{opacity:1;animation:cursor-blink 1s steps(1,end) infinite}
+.ask-field .field-cursor{background:var(--accent)}
 @keyframes cursor-blink{50%{opacity:0}}
-@media(prefers-reduced-motion:reduce){.field:focus-within input:placeholder-shown+.field-cursor,.field:focus-within textarea:placeholder-shown+.field-cursor{animation:none}}
+@media(prefers-reduced-motion:reduce){.field.cursor-active .field-cursor{animation:none}}
 h1{font-size:2.1rem;font-weight:600;color:var(--bright);letter-spacing:-.5px;line-height:1.25;margin:0 0 1.1rem}
 .label{font:.78rem/1.7 var(--mono);color:var(--faint);margin:-.6rem 0 1.6rem}.label.recap{color:var(--accent)}
 article h2,article h3,article h4{font-weight:600;color:var(--bright);letter-spacing:-.3px;margin:2em 0 .5em}article h2{font-size:1.5rem}article h3{font-size:1.2rem}article h4{font-size:1.05rem}
@@ -47,7 +48,7 @@ article hr{border:0;border-top:1px solid var(--line);margin:2em 0}
 .dock{position:fixed;left:0;right:0;bottom:0;z-index:3;background:var(--bg);border-top:1px solid var(--line)}
 .dock::before{content:"";position:absolute;left:0;right:0;bottom:100%;height:36px;background:linear-gradient(to top,var(--bg),transparent);pointer-events:none}
 .bar{max-width:720px;margin:0 auto;padding:16px 20px 18px}
-.ask form{width:100%;min-width:0}#question{min-height:1.7em;max-height:40vh;overflow:auto;caret-color:var(--accent)}
+.ask form{width:100%;min-width:0}#question{min-height:1.7em;max-height:40vh;overflow:auto}
 .quoted{display:flex;gap:10px;font-size:.9rem;color:var(--accent);margin-bottom:.6rem}
 .quoted .text{flex:1;min-width:0;font-style:italic;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .quoted .esc{flex:none;font:.74rem var(--mono);color:var(--faint)}
@@ -78,6 +79,19 @@ const $=id=>document.getElementById(id); let state; let selected=''; let mode='a
 // This tab's own in-flight request, and the one Escape cancelled. A snapshot can
 // arrive busy because another tab is asking, and that flag never clears on its own.
 let busyId=0; let cancelled=0;
+function caretPoint(control){
+  const style=getComputedStyle(control);const mirror=document.createElement('div');const marker=document.createElement('span');
+  mirror.setAttribute('aria-hidden','true');
+  Object.assign(mirror.style,{position:'fixed',visibility:'hidden',pointerEvents:'none',left:'-10000px',top:'0',margin:'0',padding:style.padding,border:style.border,boxSizing:style.boxSizing,font:style.font,letterSpacing:style.letterSpacing,wordSpacing:style.wordSpacing,textTransform:style.textTransform,tabSize:style.tabSize,whiteSpace:control.tagName==='TEXTAREA'?'pre-wrap':'pre',overflowWrap:'break-word',width:control.tagName==='TEXTAREA'?control.clientWidth+'px':'max-content'});
+  mirror.textContent=control.value.slice(0,control.selectionStart||0);marker.textContent='\u200b';mirror.append(marker);document.body.append(mirror);
+  const point={left:marker.offsetLeft-control.scrollLeft,top:marker.offsetTop-control.scrollTop,lineHeight:parseFloat(style.lineHeight)||control.clientHeight||24};mirror.remove();return point;
+}
+function placeFieldCursor(control){
+  const field=control.parentElement;const cursor=control.nextElementSibling;
+  if(document.activeElement!==control||control.selectionStart===null){field.classList.remove('cursor-active');return}
+  const point=caretPoint(control);const maxLeft=Math.max(0,control.clientWidth-cursor.offsetWidth);const maxTop=Math.max(0,control.clientHeight-cursor.offsetHeight);
+  cursor.style.left=Math.max(0,Math.min(maxLeft,point.left))+'px';cursor.style.top=Math.max(0,Math.min(maxTop,point.top+(point.lineHeight-cursor.offsetHeight)/2))+'px';field.classList.add('cursor-active');
+}
 // Browser drafts are local to this tab, keyed by the server's canonical article URL.
 const drafts = new Map();
 let draftUrl = '';
@@ -134,7 +148,7 @@ if(current&&current.selection&&!selected)selected=current.selection;showQuote();
 $('foot').textContent=footer();$('foot').className='foot'+(state.error?' error':'')+(state.busy?' busy':'');dockSpace()}
 function showQuote(){$('quoted').hidden=!selected;$('quotedText').textContent='“'+selected+'”'}
 function toBottom(){scrollTo({top:document.body.scrollHeight,behavior:'smooth'})}
-function grow(){const question=$('question');question.style.height='auto';question.style.height=question.scrollHeight+'px';dockSpace()}
+function grow(){const question=$('question');question.style.height='auto';question.style.height=question.scrollHeight+'px';dockSpace();placeFieldCursor(question)}
 // The bar is fixed, so the column has to reserve its height to keep the last lines readable.
 function dockSpace(){document.body.style.paddingBottom=($('dock').hidden?0:$('dock').offsetHeight)+'px'}
 async function refresh(){state=await api('state');render();(state.current?$('question'):$('url')).focus()}
@@ -169,7 +183,7 @@ function reopenSaved(){
   const url=$('url').value.trim();
   if(state?.pages.some(page=>page.url===url)&&url!==state.current?.article.url)loadArticle(url);
 }
-$('url').addEventListener('input',event=>{if(event.inputType==='insertReplacementText')reopenSaved()});
+$('url').addEventListener('input',event=>{if(event.inputType==='insertReplacementText')reopenSaved();placeFieldCursor($('url'))});
 // Not every engine marks a datalist pick as insertReplacementText; change is the backstop, and
 // loadArticle ignores the repeat when the two fire for one pick.
 $('url').addEventListener('change',reopenSaved);
@@ -184,6 +198,7 @@ const submitted=saveDraft();
 run('ask',{question:value,selection:selected},{question:value,selection:selected}).then(sent=>{if(sent)clearSubmittedDraft(url,submitted)})});
 $('question').addEventListener('input',()=>{saveDraft();grow()});
 $('question').addEventListener('keydown',event=>{if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();$('askForm').requestSubmit()}});
+for(const control of [$('url'),$('question')]){for(const event of ['focus','click','keyup','select','scroll'])control.addEventListener(event,()=>placeFieldCursor(control));control.addEventListener('blur',()=>placeFieldCursor(control))}
 // Answers read like the source: a passage within one answer can be explained or asked about too.
 function readable(node){
   if($('article').contains(node))return true;
@@ -267,13 +282,13 @@ for(const pane of [$('article'),$('thread')]){pane.addEventListener('mouseup',ca
 // The hint is a button: pressing it must not collapse the selection it is about to explain.
 $('hint').addEventListener('mousedown',event=>event.preventDefault());
 $('hint').addEventListener('click',()=>{explain().catch(fail)});
-document.addEventListener('selectionchange',placeHint);addEventListener('scroll',placeHint,{passive:true});addEventListener('resize',placeHint);addEventListener('resize',dockSpace);
+document.addEventListener('selectionchange',()=>{placeHint();const active=document.activeElement;if(active===$('url')||active===$('question'))placeFieldCursor(active)});addEventListener('scroll',placeHint,{passive:true});addEventListener('resize',()=>{placeHint();dockSpace();placeFieldCursor($('url'));placeFieldCursor($('question'))});
 // Apart from the hint, every action is a keystroke: enter explains a selection, esc unwinds, any letter starts a question.
 addEventListener('keydown',event=>{const typing=event.target===$('question')||event.target===$('url');
 if(event.key==='Escape'){event.preventDefault();escape().catch(fail);return}
 if(typing||event.metaKey||event.ctrlKey||event.altKey)return;
 if(event.key==='Enter'){if(selected){event.preventDefault();explain().catch(fail)}return}
-if(event.key.length===1&&event.key!==' '){event.preventDefault();if(!state?.current){const url=$('url');url.focus();url.value+=event.key;return}const question=$('question');question.focus();question.value+=event.key;saveDraft();grow()}});
+if(event.key.length===1&&event.key!==' '){event.preventDefault();if(!state?.current){const url=$('url');url.focus();url.value+=event.key;placeFieldCursor(url);return}const question=$('question');question.focus();question.value+=event.key;saveDraft();grow()}});
 dockSpace();
 refresh().catch(fail);
 </script>
