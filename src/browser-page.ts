@@ -141,9 +141,9 @@ if(id===requestId){pending=null;state=result;selected=state.current?.selection||
 return id!==cancelled&&!result.error}
 catch(error){if(id===requestId){pending=null;fail(error)}return false}
 finally{if(busyId===id)busyId=0}}
-async function explain(){if(busyId)return;const live=selectionText();if(live){selected=live;showQuote()}if(!selected)return;await run('explain',{selection:selected},{question:'Explain this passage.',selection:selected})}
+async function explain(){if(busyId)return;holdSelection();if(!selected)return;await run('explain',{selection:selected},{question:'Explain this passage.',selection:selected})}
 async function escape(){if(state?.busy||busyId){cancelled=requestId;requestId++;busyId=0;pending=null;loading=null;state=await api('cancel',{});flashStatus();render();return}
-if(selected){selected='';$('hint').hidden=true;getSelection()?.removeAllRanges();state=await api('select',{selection:''});render();return}
+if(selected){const quote=selected;selected='';$('hint').hidden=true;getSelection()?.removeAllRanges();state=await api('select',{selection:''});render();revealQuote(quote);return}
 if(mode==='summary'){mode='article';render()}}
 // run('load') restores the selection from the snapshot it returns, so nothing is cleared here.
 function loadArticle(url){
@@ -190,12 +190,59 @@ function selectionText(){
   const current=articleSelection();
   return current?current.selection.toString().replace(/\s+/g,' ').trim().slice(0,20000):'';
 }
-function captureSelection(){
+// Attaches the live selection as the quote, noting where it starts so Escape can return to it.
+function holdSelection(){
+  const current=articleSelection();
   const text=selectionText();
-  if(!text)return;
+  if(!text)return false;
   selected=text;
+  quoteAt=quoteOffset(current.range);
   showQuote();
-  api('select',{selection:selected}).catch(fail);
+  return true;
+}
+function captureSelection(){
+  if(holdSelection())api('select',{selection:selected}).catch(fail);
+}
+// The article is rebuilt on every render, so a quote is found again by its text rather than
+// a held Range. Whitespace is dropped on both sides: a selection's line breaks between
+// paragraphs are not in the text nodes.
+let quoteAt=-1;
+function squash(text){return text.replace(/\s+/g,'')}
+function quoteOffset(range){
+  const before=document.createRange();
+  before.setStart($('article'),0);
+  before.setEnd(range.startContainer,range.startOffset);
+  return squash(before.toString()).length;
+}
+// After Escape clears a quote, scroll back to its passage unless it is already in view. Where
+// it was selected wins over an earlier repeat of the same words; a quote restored from another
+// tab has no such position and falls back to the first match.
+function revealQuote(quote){
+  const needle=squash(quote);
+  if(mode!=='article'||!needle)return;
+  const walker=document.createTreeWalker($('article'),NodeFilter.SHOW_TEXT);
+  const nodes=[];
+  let flat='';
+  for(let node=walker.nextNode();node;node=walker.nextNode()){
+    const text=squash(node.data);
+    nodes.push({node,start:flat.length,length:text.length});
+    flat+=text;
+  }
+  const at=quoteAt>=0&&flat.startsWith(needle,quoteAt)?quoteAt:flat.indexOf(needle);
+  const hit=at<0?null:nodes.find(item=>item.start<=at&&at<item.start+item.length);
+  if(!hit)return;
+  let offset=0;
+  for(let seen=0;;offset++){
+    if(/\s/.test(hit.node.data[offset]))continue;
+    if(seen===at-hit.start)break;
+    seen++;
+  }
+  const range=document.createRange();
+  range.setStart(hit.node,offset);
+  range.setEnd(hit.node,offset+1);
+  const rect=range.getBoundingClientRect();
+  if(rect.top>=0&&rect.bottom<=innerHeight-$('dock').offsetHeight)return;
+  scrollTo({top:scrollY+rect.top-innerHeight/3,behavior:'smooth'});
 }
 function placeHint(){
   const hint=$('hint');
