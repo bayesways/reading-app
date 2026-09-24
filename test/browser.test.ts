@@ -204,6 +204,13 @@ function fixture(): BrowserSnapshot {
   };
 }
 
+function emptyFixture(): BrowserSnapshot {
+  return {
+    model: "provider/model", status: "Paste a URL or file path to begin.", error: false, busy: false,
+    showingSummary: false, pages: [],
+  };
+}
+
 /** Drives the real client script in jsdom with the pi API stubbed out. */
 async function client(t: TestContext, snapshot = fixture(), holdFirstResponse = false) {
   const calls: Array<{ action: string; body?: Record<string, unknown> }> = [];
@@ -280,6 +287,27 @@ test("browser page renders one column with no dropdowns or status bar", async (t
   assert.ok(dock.contains(document.getElementById("question")!) && dock.contains(document.getElementById("foot")!));
   assert.match(page, /\.dock\{[^}]*position:fixed[^}]*bottom:0/);
   assert.match(document.body.style.paddingBottom, /px$/); // The column reserves the bar's height.
+});
+
+test("browser landing page is empty until a source loads, then focuses the ask line", async (t) => {
+  const page = browserPage("test-nonce");
+  const ui = await client(t, emptyFixture());
+  assert.equal(ui.$("article").textContent, "");
+  assert.equal(ui.$("thread").hidden, true);
+  assert.equal(ui.$("dock").hidden, true);
+  assert.equal(ui.window.document.activeElement, ui.$("url"));
+  assert.match(page, /\.field-cursor\{[^}]*width:7px/);
+  assert.match(page, /\.ask-field \.field-cursor\{[^}]*background:var\(--accent\)/);
+
+  const loaded = ui.deferNext();
+  ui.type("url", "https://example.com/a");
+  await ui.submit("loadForm");
+  assert.equal(ui.$("dock").hidden, true);
+  loaded(fixture());
+  await ui.settle();
+  assert.equal(ui.$("dock").hidden, false);
+  assert.equal(ui.window.document.activeElement, ui.$("question"));
+  assert.equal(ui.$("question").nextElementSibling?.className, "field-cursor");
 });
 
 test("browser page asks and runs /recap and /article from the ask line", async (t) => {

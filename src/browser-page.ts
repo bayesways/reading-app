@@ -18,7 +18,13 @@ input::placeholder,textarea::placeholder{color:var(--faint)}
 /* the only chrome: a wordmark and a bare url line. enter loads, no button. */
 .top{display:flex;align-items:baseline;gap:16px;border-bottom:1px solid var(--line);padding-bottom:14px;margin-bottom:44px}
 .mark{flex:none;font-size:.95rem;font-weight:600;letter-spacing:-.3px}
-.top form{flex:1;min-width:0}#url{font:.82rem/1.7 var(--mono);color:var(--muted);text-overflow:ellipsis}#url:focus{color:var(--text)}
+.top form{flex:1;min-width:0}.field{position:relative;min-width:0}.field input,.field textarea{padding-left:12px}
+#url{font:.82rem/1.7 var(--mono);color:var(--muted);text-overflow:ellipsis;caret-color:var(--text)}#url:focus{color:var(--text)}
+.field-cursor{position:absolute;left:0;top:50%;width:7px;height:1.3em;transform:translateY(-50%);background:var(--text);opacity:0;pointer-events:none}
+.field:focus-within input:placeholder-shown+.field-cursor,.field:focus-within textarea:placeholder-shown+.field-cursor{opacity:1;animation:cursor-blink 1s steps(1,end) infinite}
+.ask-field .field-cursor{top:.85em;background:var(--accent)}
+@keyframes cursor-blink{50%{opacity:0}}
+@media(prefers-reduced-motion:reduce){.field:focus-within input:placeholder-shown+.field-cursor,.field:focus-within textarea:placeholder-shown+.field-cursor{animation:none}}
 h1{font-size:2.1rem;font-weight:600;color:var(--bright);letter-spacing:-.5px;line-height:1.25;margin:0 0 1.1rem}
 .label{font:.78rem/1.7 var(--mono);color:var(--faint);margin:-.6rem 0 1.6rem}.label.recap{color:var(--accent)}
 article h2,article h3,article h4{font-weight:600;color:var(--bright);letter-spacing:-.3px;margin:2em 0 .5em}article h2{font-size:1.5rem}article h3{font-size:1.2rem}article h4{font-size:1.05rem}
@@ -41,8 +47,7 @@ article hr{border:0;border-top:1px solid var(--line);margin:2em 0}
 .dock{position:fixed;left:0;right:0;bottom:0;z-index:3;background:var(--bg);border-top:1px solid var(--line)}
 .dock::before{content:"";position:absolute;left:0;right:0;bottom:100%;height:36px;background:linear-gradient(to top,var(--bg),transparent);pointer-events:none}
 .bar{max-width:720px;margin:0 auto;padding:16px 20px 18px}
-.ask{display:flex;align-items:baseline;gap:10px}
-.ask .caret{flex:none;color:var(--accent)}.ask form{flex:1;min-width:0}#question{max-height:40vh;overflow:auto}
+.ask form{width:100%;min-width:0}#question{min-height:1.7em;max-height:40vh;overflow:auto;caret-color:var(--accent)}
 .quoted{display:flex;gap:10px;font-size:.9rem;color:var(--accent);margin-bottom:.6rem}
 .quoted .text{flex:1;min-width:0;font-style:italic;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .quoted .esc{flex:none;font:.74rem var(--mono);color:var(--faint)}
@@ -57,11 +62,11 @@ article hr{border:0;border-top:1px solid var(--line);margin:2em 0}
 </head>
 <body>
 <div class="col">
-<div class="top"><span class="mark">reader</span><form id="loadForm"><input id="url" type="text" list="pages" spellcheck="false" autocomplete="off" placeholder="paste a url or file path, then press enter" aria-label="Article URL or file path"></form><datalist id="pages"></datalist></div>
+<div class="top"><span class="mark">reader</span><form id="loadForm"><div class="field"><input id="url" type="text" list="pages" spellcheck="false" autocomplete="off" placeholder="paste a url or file path, then press enter" aria-label="Article URL or file path" autofocus><span class="field-cursor" aria-hidden="true"></span></div></form><datalist id="pages"></datalist></div>
 <article id="article"></article>
 <section class="thread" id="thread" hidden></section>
 </div>
-<div class="dock" id="dock"><div class="bar"><div class="ask"><span class="caret">&rsaquo;</span><form id="askForm"><div class="quoted" id="quoted" hidden><span class="text" id="quotedText"></span><span class="esc">esc clears</span></div><textarea id="question" rows="1" placeholder="ask, or /recap" aria-label="Ask about this article"></textarea></form></div>
+<div class="dock" id="dock" hidden><div class="bar"><div class="ask"><form id="askForm"><div class="quoted" id="quoted" hidden><span class="text" id="quotedText"></span><span class="esc">esc clears</span></div><div class="field ask-field"><textarea id="question" rows="1" placeholder="ask, or /recap" aria-label="Ask about this article"></textarea><span class="field-cursor" aria-hidden="true"></span></div></form></div>
 <div class="foot" id="foot">Connecting to pi…</div>
 </div></div>
 <button class="hint" id="hint" type="button" hidden aria-label="Explain the selected passage">&crarr; explain</button>
@@ -110,7 +115,7 @@ function note(text,extra){const p=document.createElement('p');p.className='label
 function exchange(number,question,quote,answer,sourceUrl){const box=document.createElement('section');box.className='ex'+(answer?'':' waiting');const q=document.createElement('p');q.className='q';const n=document.createElement('span');n.className='n';n.textContent='Q'+number;q.append(n,document.createTextNode(question));box.append(q);if(quote){const blockquote=document.createElement('blockquote');blockquote.textContent=quote;box.append(blockquote)}const body=document.createElement('div');if(answer){body.className='a';markdown(answer,body,sourceUrl)}else body.append(note('waiting for your model… esc cancels'));box.append(body);return box}
 function footer(){if(!state)return'';if(state.busy||state.error||flash)return state.status;const pages=state.pages.length;return [state.model,'in memory',pages?pages+' page'+(pages===1?'':'s'):'no pages'].join(' · ')}
 function flashStatus(){clearTimeout(flashTimer);flash=1;flashTimer=setTimeout(()=>{flash=0;render()},6000)}
-function render(){if(!state)return;const current=state.current;
+function render(){if(!state)return;const current=state.current;$('dock').hidden=!current;
 restoreDraft(current?.article.url || '');
 const shown=loading?.url||(current?current.article.url:'');
 if(shown&&document.activeElement!==$('url'))$('url').value=shown;
@@ -119,7 +124,7 @@ const body=$('article');body.replaceChildren();
 if(current){const h1=document.createElement('h1');h1.textContent=current.article.title;body.append(h1);
 if(mode==='summary'){body.append(note('recap · type /article to return to the page','recap'));const recap=document.createElement('div');markdown(current.summary||'*No recap yet. Type /recap to make one.*',recap,current.article.url);body.append(recap)}
 else{if(current.article.warning)body.append(note(current.article.warning));const text=document.createElement('div');markdown(withoutTitle(current.article.markdown,current.article.title),text,current.article.url);body.append(text)}}
-else body.append(note('paste a url or file path above to begin. nothing is saved; everything lives in this session.'));
+else if(state.busy||state.error||flash)body.append(note(state.status));
 const thread=$('thread');thread.replaceChildren();const exchanges=current?current.exchanges:[];
 exchanges.forEach((item,index)=>thread.append(exchange(index+1,item.question,item.selection,item.answer,current?.article.url)));
 if(pending)thread.append(exchange(exchanges.length+1,pending.question,pending.selection,''));
@@ -131,8 +136,8 @@ function showQuote(){$('quoted').hidden=!selected;$('quotedText').textContent='�
 function toBottom(){scrollTo({top:document.body.scrollHeight,behavior:'smooth'})}
 function grow(){const question=$('question');question.style.height='auto';question.style.height=question.scrollHeight+'px';dockSpace()}
 // The bar is fixed, so the column has to reserve its height to keep the last lines readable.
-function dockSpace(){document.body.style.paddingBottom=$('dock').offsetHeight+'px'}
-async function refresh(){state=await api('state');render();if(!state.current)$('url').focus()}
+function dockSpace(){document.body.style.paddingBottom=($('dock').hidden?0:$('dock').offsetHeight)+'px'}
+async function refresh(){state=await api('state');render();(state.current?$('question'):$('url')).focus()}
 async function run(action,payload,item){const id=++requestId;busyId=id;pending=item||null;
 try{state={...state,busy:true,error:false,status:action==='summary'?'Summarizing your reading and discussion… Esc cancels.':action==='load'?'Loading source… Esc cancels.':'Asking your pi model… Esc cancels.'};render();if(item)toBottom();
 const result=await api(action,payload);
@@ -152,7 +157,7 @@ function loadArticle(url){
   loading=operation;
   mode='article';
   $('url').blur();
-  run('load',{url}).finally(()=>{if(loading===operation){loading=null;render()}});
+  run('load',{url}).then(loaded=>{if(loaded&&state?.current)$('question').focus();else if(!state?.current)$('url').focus()}).finally(()=>{if(loading===operation){loading=null;render()}});
 }
 $('loadForm').addEventListener('submit',event=>{
   event.preventDefault();
@@ -268,7 +273,7 @@ addEventListener('keydown',event=>{const typing=event.target===$('question')||ev
 if(event.key==='Escape'){event.preventDefault();escape().catch(fail);return}
 if(typing||event.metaKey||event.ctrlKey||event.altKey)return;
 if(event.key==='Enter'){if(selected){event.preventDefault();explain().catch(fail)}return}
-if(event.key.length===1&&event.key!==' '){event.preventDefault();const question=$('question');question.focus();question.value+=event.key;saveDraft();grow()}});
+if(event.key.length===1&&event.key!==' '){event.preventDefault();if(!state?.current){const url=$('url');url.focus();url.value+=event.key;return}const question=$('question');question.focus();question.value+=event.key;saveDraft();grow()}});
 dockSpace();
 refresh().catch(fail);
 </script>
