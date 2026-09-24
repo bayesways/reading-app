@@ -107,7 +107,7 @@ function fail(error){state={...state,busy:false,error:true,status:error.message}
 // The title is rendered as the page's own heading; drop it from the body to avoid a duplicate.
 function withoutTitle(text,title){const m=(text||'').match(/^#\s+(.+)\n?/);return m&&m[1].trim().toLowerCase()===(title||'').trim().toLowerCase()?text.slice(m[0].length):text}
 function note(text,extra){const p=document.createElement('p');p.className='label'+(extra?' '+extra:'');p.textContent=text;return p}
-function exchange(number,question,quote,answer,sourceUrl){const box=document.createElement('section');box.className='ex'+(answer?'':' waiting');const q=document.createElement('p');q.className='q';const n=document.createElement('span');n.className='n';n.textContent='Q'+number;q.append(n,document.createTextNode(question));box.append(q);if(quote){const blockquote=document.createElement('blockquote');blockquote.textContent=quote;box.append(blockquote)}const body=document.createElement('div');if(answer)markdown(answer,body,sourceUrl);else body.append(note('waiting for your model… esc cancels'));box.append(body);return box}
+function exchange(number,question,quote,answer,sourceUrl){const box=document.createElement('section');box.className='ex'+(answer?'':' waiting');const q=document.createElement('p');q.className='q';const n=document.createElement('span');n.className='n';n.textContent='Q'+number;q.append(n,document.createTextNode(question));box.append(q);if(quote){const blockquote=document.createElement('blockquote');blockquote.textContent=quote;box.append(blockquote)}const body=document.createElement('div');if(answer){body.className='a';markdown(answer,body,sourceUrl)}else body.append(note('waiting for your model… esc cancels'));box.append(body);return box}
 function footer(){if(!state)return'';if(state.busy||state.error||flash)return state.status;const pages=state.pages.length;return [state.model,'in memory',pages?pages+' page'+(pages===1?'':'s'):'no pages'].join(' · ')}
 function flashStatus(){clearTimeout(flashTimer);flash=1;flashTimer=setTimeout(()=>{flash=0;render()},6000)}
 function render(){if(!state)return;const current=state.current;
@@ -179,11 +179,17 @@ const submitted=saveDraft();
 run('ask',{question:value,selection:selected},{question:value,selection:selected}).then(sent=>{if(sent)clearSubmittedDraft(url,submitted)})});
 $('question').addEventListener('input',()=>{saveDraft();grow()});
 $('question').addEventListener('keydown',event=>{if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();$('askForm').requestSubmit()}});
+// Answers read like the source: a passage within one answer can be explained or asked about too.
+function readable(node){
+  if($('article').contains(node))return true;
+  const element=node.nodeType===1?node:node.parentElement;
+  return !!element?.closest('#thread .a');
+}
 function articleSelection(){
   const selection=getSelection();
   if(!selection||selection.isCollapsed||!selection.rangeCount)return;
   const range=selection.getRangeAt(0);
-  if(!$('article').contains(range.commonAncestorContainer))return;
+  if(!readable(range.commonAncestorContainer))return;
   return {selection,range};
 }
 function selectionText(){
@@ -205,7 +211,7 @@ function placeHint(){
   hint.hidden=!rect;
   if(rect)hint.style.transform='translate('+Math.round(Math.max(4,Math.min(rect.right+10,innerWidth-96)))+'px,'+Math.round(Math.max(4,rect.top))+'px)';
 }
-$('article').addEventListener('mouseup',captureSelection);$('article').addEventListener('keyup',captureSelection);
+for(const pane of [$('article'),$('thread')]){pane.addEventListener('mouseup',captureSelection);pane.addEventListener('keyup',captureSelection)}
 // The hint is a button: pressing it must not collapse the selection it is about to explain.
 $('hint').addEventListener('mousedown',event=>event.preventDefault());
 $('hint').addEventListener('click',()=>{explain().catch(fail)});

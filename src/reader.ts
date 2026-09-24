@@ -135,7 +135,7 @@ export class ReaderState {
       this.notify("Select a passage first: click/drag in fullscreen, or press v in the article.", true);
       return false;
     }
-    return this.ask("Explain the selected passage in the context of this article. If it is a word or term, define it simply and give a short example.");
+    return this.ask("Explain the selected passage in the context of this article and our discussion. If it is a word or term, define it simply and give a short example.");
   }
 
   async ask(question: string, kind: ReplyKind = "question"): Promise<boolean> {

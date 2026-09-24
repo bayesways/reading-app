@@ -85,7 +85,7 @@ Each file keeps its own discussion. Different spellings of the same file (includ
 
 ### Browser
 
-Select text in the article and an **↵ explain** button appears beside it: click it, or press `Enter`, to ask for an explanation of that passage. The passage stays attached to your next question until `Esc` clears it. Type in the ask line at the bottom to ask anything, `/recap` for a recap of the article and its completed Q&A, and `/article` to return to the page. Paste a URL or file path in the top line to load a page; each source keeps its own discussion.
+Select text in the article and an **↵ explain** button appears beside it: click it, or press `Enter`, to ask for an explanation of that passage. The passage stays attached to your next question until `Esc` clears it. Answers work the same way: select text in a previous answer to have it explained or to attach it to a follow-up question. Type in the ask line at the bottom to ask anything, `/recap` for a recap of the article and its completed Q&A, and `/article` to return to the page. Paste a URL or file path in the top line to load a page; each source keeps its own discussion.
 
 Unsent questions stay with their article as you switch pages in the same browser tab. You can draft the next question while an answer is loading; completing the answer will not erase your edits. Drafts are held in the tab's memory and are cleared when it reloads or closes.
 
