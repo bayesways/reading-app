@@ -215,8 +215,8 @@ function emptyFixture(): BrowserSnapshot {
 async function client(t: TestContext, snapshot = fixture(), holdFirstResponse = false) {
   const calls: Array<{ action: string; body?: Record<string, unknown> }> = [];
   let hang = false;
-  let nextResponse: Promise<BrowserSnapshot> | undefined;
-  let releaseFirst: ((snapshot: BrowserSnapshot) => void) | undefined;
+  let nextResponse: Promise<BrowserSnapshot | Error> | undefined;
+  let releaseFirst: ((snapshot: BrowserSnapshot | Error) => void) | undefined;
   if (holdFirstResponse) nextResponse = new Promise((done) => { releaseFirst = done; });
   const dom = new JSDOM(browserPage("test-nonce"), {
     runScripts: "dangerously", url: "http://127.0.0.1:1/capability/", virtualConsole: new VirtualConsole(),
@@ -230,6 +230,7 @@ async function client(t: TestContext, snapshot = fixture(), holdFirstResponse = 
           const response = nextResponse;
           nextResponse = undefined;
           const result = await response;
+          if (result instanceof Error) return { ok: false, status: 500, json: async () => ({ error: result.message }) };
           return { ok: true, json: async () => result };
         }
         if (hang && action !== "cancel") return new Promise(() => {});
@@ -246,10 +247,10 @@ async function client(t: TestContext, snapshot = fixture(), holdFirstResponse = 
   await settle();
   return {
     window, calls, settle,
-    releaseFirst: (response = snapshot) => { releaseFirst!(response); },
+    releaseFirst: (response: BrowserSnapshot | Error = snapshot) => { releaseFirst!(response); },
     hangNext: () => { hang = true; },
     deferNext: () => {
-      let resolve!: (snapshot: BrowserSnapshot) => void;
+      let resolve!: (snapshot: BrowserSnapshot | Error) => void;
       nextResponse = new Promise((done) => { resolve = done; });
       return resolve;
     },
@@ -281,6 +282,10 @@ test("browser page renders one column with no dropdowns or status bar", async (t
   assert.match(document.getElementById("thread")!.textContent!, /worse moves/);
   assert.equal(document.getElementById("foot")!.textContent, "provider/model");
   assert.equal((document.getElementById("url") as HTMLInputElement).value, "https://example.com/a");
+  // jsdom ignores autofocus, but a browser would focus the url line before the first render and keep
+  // the article's address out of it.
+  assert.equal(document.querySelector("[autofocus]"), null);
+  assert.equal(document.activeElement, document.body); // Space and the arrow keys scroll the article.
   // The ask line and its foot are a bar fixed to the window, not the tail of a long article.
   const dock = document.getElementById("dock")!;
   assert.equal(dock.closest(".col"), null);
@@ -289,14 +294,14 @@ test("browser page renders one column with no dropdowns or status bar", async (t
   assert.match(document.body.style.paddingBottom, /px$/); // The column reserves the bar's height.
 });
 
-test("browser landing page is empty until a source loads, then focuses the ask line", async (t) => {
+test("browser landing page is empty until a source loads, then leaves focus on the page", async (t) => {
   const page = browserPage("test-nonce");
   const ui = await client(t, emptyFixture());
   assert.equal(ui.$("article").textContent, "");
   assert.equal(ui.$("thread").hidden, true);
   assert.equal(ui.$("dock").hidden, true);
   assert.equal(ui.window.document.activeElement, ui.$("url"));
-  assert.match(page, /\.field input,.field textarea\{caret-color:transparent\}/);
+  assert.match(page, /\.field input,\.field textarea\{caret-color:transparent\}/);
   assert.match(page, /\.field-cursor\{[^}]*width:8px/);
   assert.match(page, /\.ask-field \.field-cursor\{[^}]*background:var\(--accent\);animation:cursor-pulse 2\.8s ease-in-out/);
   assert.match(page, /@keyframes cursor-pulse\{0%,100%\{opacity:\.15\}50%\{opacity:\.46\}\}/);
@@ -309,8 +314,11 @@ test("browser landing page is empty until a source loads, then focuses the ask l
   loaded(fixture());
   await ui.settle();
   assert.equal(ui.$("dock").hidden, false);
-  assert.equal(ui.window.document.activeElement, ui.$("question"));
+  // Focus stays on the page so it scrolls; the ask line is still one letter away.
+  assert.equal(ui.window.document.activeElement, ui.window.document.body);
   assert.equal(ui.$("question").nextElementSibling?.className, "field-cursor");
+  await ui.press("t");
+  assert.equal(ui.window.document.activeElement, ui.$("question"));
   ui.type("question", "terminal cursor");
   assert.ok(ui.$("question").parentElement?.classList.contains("cursor-active"));
   (ui.$("url") as HTMLInputElement).focus();
@@ -446,6 +454,36 @@ test("an answer that lands after a page switch clears its own draft, not the new
   // The page switch superseded the response, but the server still answered the
   // question, so leaving it in A's composer would only invite a duplicate ask.
   assert.equal((ui.$("question") as HTMLTextAreaElement).value, "");
+});
+
+test("a failed first snapshot shows its error on the landing page", async (t) => {
+  const ui = await client(t, fixture(), true);
+  ui.releaseFirst(new Error("pi is not running"));
+  await ui.settle();
+  assert.equal(ui.$("dock").hidden, true);
+  assert.equal(ui.$("article").textContent, "pi is not running");
+  assert.equal(ui.window.document.activeElement, ui.window.document.body);
+});
+
+test("a landing page takes the url line back after a failed load, unless a newer load owns it", async (t) => {
+  const ui = await client(t, emptyFixture());
+  const failed = ui.deferNext();
+  ui.type("url", "https://example.com/missing");
+  await ui.submit("loadForm");
+  failed(new Error("Could not load that page."));
+  await ui.settle();
+  assert.equal(ui.window.document.activeElement, ui.$("url"));
+  assert.equal((ui.$("url") as HTMLInputElement).value, "https://example.com/missing");
+
+  const first = ui.deferNext();
+  ui.type("url", "https://example.com/slow");
+  await ui.submit("loadForm");
+  ui.hangNext();
+  ui.type("url", "https://example.com/a");
+  await ui.submit("loadForm");
+  first(new Error("Replaced."));
+  await ui.settle();
+  assert.notEqual(ui.window.document.activeElement, ui.$("url"));
 });
 
 test("a question typed while the first snapshot is in flight belongs to the article that arrives", async (t) => {

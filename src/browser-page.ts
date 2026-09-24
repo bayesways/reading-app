@@ -64,7 +64,7 @@ article hr{border:0;border-top:1px solid var(--line);margin:2em 0}
 </head>
 <body>
 <div class="col">
-<div class="top"><span class="mark">reader</span><form id="loadForm"><div class="field"><input id="url" type="text" list="pages" spellcheck="false" autocomplete="off" placeholder="paste a url or file path, then press enter" aria-label="Article URL or file path" autofocus><span class="field-cursor" aria-hidden="true"></span></div></form><datalist id="pages"></datalist></div>
+<div class="top"><span class="mark">reader</span><form id="loadForm"><div class="field"><input id="url" type="text" list="pages" spellcheck="false" autocomplete="off" placeholder="paste a url or file path, then press enter" aria-label="Article URL or file path"><span class="field-cursor" aria-hidden="true"></span></div></form><datalist id="pages"></datalist></div>
 <article id="article"></article>
 <section class="thread" id="thread" hidden></section>
 </div>
@@ -124,7 +124,8 @@ function clearSubmittedDraft(url, submitted) {
   if (draftUrl === key) { $('question').value = ''; grow(); }
 }
 async function api(action='',payload,method=payload?'POST':'GET'){const options={method,headers:{'Accept':'application/json'}};if(payload!==undefined){options.headers['Content-Type']='application/json';options.body=JSON.stringify(payload)}const response=await fetch(base+'api/'+action,options);const data=await response.json().catch(()=>({error:'Invalid response from pi.'}));if(!response.ok)throw new Error(data.error||('Request failed: '+response.status));return data}
-function fail(error){state={...state,busy:false,error:true,status:error.message};flashStatus();render()}
+// A failure before the first snapshot still leaves a well-formed state for render to show it on.
+function fail(error){state={pages:[],...state,busy:false,error:true,status:error.message};flashStatus();render()}
 // The title is rendered as the page's own heading; drop it from the body to avoid a duplicate.
 function withoutTitle(text,title){const m=(text||'').match(/^#\s+(.+)\n?/);return m&&m[1].trim().toLowerCase()===(title||'').trim().toLowerCase()?text.slice(m[0].length):text}
 function note(text,extra){const p=document.createElement('p');p.className='label'+(extra?' '+extra:'');p.textContent=text;return p}
@@ -153,7 +154,9 @@ function toBottom(){scrollTo({top:document.body.scrollHeight,behavior:'smooth'})
 function grow(){const question=$('question');question.style.height='auto';question.style.height=question.scrollHeight+'px';dockSpace();placeFieldCursor(question)}
 // The bar is fixed, so the column has to reserve its height to keep the last lines readable.
 function dockSpace(){document.body.style.paddingBottom=($('dock').hidden?0:$('dock').offsetHeight)+'px'}
-async function refresh(){state=await api('state');render();(state.current?$('question'):$('url')).focus()}
+// Focus stays on the page when there is an article, so space and the arrow keys scroll it;
+// any letter still starts a question.
+async function refresh(){state=await api('state');render();if(!state.current)$('url').focus()}
 async function run(action,payload,item){const id=++requestId;busyId=id;pending=item||null;
 try{state={...state,busy:true,error:false,status:action==='summary'?'Summarizing your reading and discussion… Esc cancels.':action==='load'?'Loading source… Esc cancels.':'Asking your pi model… Esc cancels.'};render();if(item)toBottom();
 const result=await api(action,payload);
@@ -173,7 +176,8 @@ function loadArticle(url){
   loading=operation;
   mode='article';
   $('url').blur();
-  run('load',{url}).then(loaded=>{if(loaded&&state?.current)$('question').focus();else if(!state?.current)$('url').focus()}).finally(()=>{if(loading===operation){loading=null;render()}});
+  // Only a landing page that is still waiting on this load takes the url line back; a newer load owns focus.
+  run('load',{url}).then(loaded=>{if(!loaded&&!state?.current&&(!loading||loading===operation))$('url').focus()}).finally(()=>{if(loading===operation){loading=null;render()}});
 }
 $('loadForm').addEventListener('submit',event=>{
   event.preventDefault();
