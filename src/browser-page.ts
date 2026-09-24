@@ -19,13 +19,15 @@ input::placeholder,textarea::placeholder{color:var(--faint)}
 .top{display:flex;align-items:baseline;gap:16px;border-bottom:1px solid var(--line);padding-bottom:14px;margin-bottom:44px}
 .mark{flex:none;font-size:.95rem;font-weight:600;letter-spacing:-.3px}
 .top form{flex:1;min-width:0}.field{position:relative;min-width:0}.field input,.field textarea{caret-color:transparent}
-.field:focus-within input:placeholder-shown,.field:focus-within textarea:placeholder-shown{text-indent:12px}
+.field:focus-within input:placeholder-shown,.field textarea:placeholder-shown{text-indent:12px}
 #url{font:.82rem/1.7 var(--mono);color:var(--muted);text-overflow:ellipsis}#url:focus{color:var(--text)}
 .field-cursor{position:absolute;left:0;top:0;width:8px;height:1.3em;background:var(--text);opacity:0;pointer-events:none;z-index:1}
 .field.cursor-active .field-cursor{opacity:1;animation:cursor-blink 1s steps(1,end) infinite}
 .ask-field .field-cursor{background:var(--accent)}
+.ask-field:not(.cursor-active) .field-cursor{animation:cursor-pulse 3.6s ease-in-out infinite}
 @keyframes cursor-blink{50%{opacity:0}}
-@media(prefers-reduced-motion:reduce){.field.cursor-active .field-cursor{animation:none}}
+@keyframes cursor-pulse{0%,100%{opacity:.12}50%{opacity:.42}}
+@media(prefers-reduced-motion:reduce){.field.cursor-active .field-cursor{animation:none}.ask-field:not(.cursor-active) .field-cursor{animation:none;opacity:.24}}
 h1{font-size:2.1rem;font-weight:600;color:var(--bright);letter-spacing:-.5px;line-height:1.25;margin:0 0 1.1rem}
 .label{font:.78rem/1.7 var(--mono);color:var(--faint);margin:-.6rem 0 1.6rem}.label.recap{color:var(--accent)}
 article h2,article h3,article h4{font-weight:600;color:var(--bright);letter-spacing:-.3px;margin:2em 0 .5em}article h2{font-size:1.5rem}article h3{font-size:1.2rem}article h4{font-size:1.05rem}
@@ -79,18 +81,19 @@ const $=id=>document.getElementById(id); let state; let selected=''; let mode='a
 // This tab's own in-flight request, and the one Escape cancelled. A snapshot can
 // arrive busy because another tab is asking, and that flag never clears on its own.
 let busyId=0; let cancelled=0;
-function caretPoint(control){
+function caretPoint(control,position){
   const style=getComputedStyle(control);const mirror=document.createElement('div');const marker=document.createElement('span');
   mirror.setAttribute('aria-hidden','true');
   Object.assign(mirror.style,{position:'fixed',visibility:'hidden',pointerEvents:'none',left:'-10000px',top:'0',margin:'0',padding:style.padding,border:style.border,boxSizing:style.boxSizing,font:style.font,letterSpacing:style.letterSpacing,wordSpacing:style.wordSpacing,textTransform:style.textTransform,tabSize:style.tabSize,whiteSpace:control.tagName==='TEXTAREA'?'pre-wrap':'pre',overflowWrap:'break-word',width:control.tagName==='TEXTAREA'?control.clientWidth+'px':'max-content'});
-  mirror.textContent=control.value.slice(0,control.selectionStart||0);marker.textContent='\u200b';mirror.append(marker);document.body.append(mirror);
+  mirror.textContent=control.value.slice(0,position);marker.textContent='\u200b';mirror.append(marker);document.body.append(mirror);
   const point={left:marker.offsetLeft-control.scrollLeft,top:marker.offsetTop-control.scrollTop,lineHeight:parseFloat(style.lineHeight)||control.clientHeight||24};mirror.remove();return point;
 }
 function placeFieldCursor(control){
   const field=control.parentElement;const cursor=control.nextElementSibling;
-  if(document.activeElement!==control||control.selectionStart===null){field.classList.remove('cursor-active');return}
-  const point=caretPoint(control);const maxLeft=Math.max(0,control.clientWidth-cursor.offsetWidth);const maxTop=Math.max(0,control.clientHeight-cursor.offsetHeight);
-  cursor.style.left=Math.max(0,Math.min(maxLeft,point.left))+'px';cursor.style.top=Math.max(0,Math.min(maxTop,point.top+(point.lineHeight-cursor.offsetHeight)/2))+'px';field.classList.add('cursor-active');
+  const active=document.activeElement===control;field.classList.toggle('cursor-active',active);
+  if((!active&&control!==$('question'))||control.selectionStart===null)return;
+  const point=caretPoint(control,active?control.selectionStart:control.value.length);const maxLeft=Math.max(0,control.clientWidth-cursor.offsetWidth);const maxTop=Math.max(0,control.clientHeight-cursor.offsetHeight);
+  cursor.style.left=Math.max(0,Math.min(maxLeft,point.left))+'px';cursor.style.top=Math.max(0,Math.min(maxTop,point.top+(point.lineHeight-cursor.offsetHeight)/2))+'px';
 }
 // Browser drafts are local to this tab, keyed by the server's canonical article URL.
 const drafts = new Map();

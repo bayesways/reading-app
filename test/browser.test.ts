@@ -299,6 +299,7 @@ test("browser landing page is empty until a source loads, then focuses the ask l
   assert.match(page, /\.field input,.field textarea\{caret-color:transparent\}/);
   assert.match(page, /\.field-cursor\{[^}]*width:8px/);
   assert.match(page, /\.ask-field \.field-cursor\{[^}]*background:var\(--accent\)/);
+  assert.match(page, /\.ask-field:not\(\.cursor-active\) \.field-cursor\{animation:cursor-pulse 3\.6s/);
   assert.ok(ui.$("url").parentElement?.classList.contains("cursor-active"));
 
   const loaded = ui.deferNext();
@@ -312,6 +313,9 @@ test("browser landing page is empty until a source loads, then focuses the ask l
   assert.equal(ui.$("question").nextElementSibling?.className, "field-cursor");
   ui.type("question", "terminal cursor");
   assert.ok(ui.$("question").parentElement?.classList.contains("cursor-active"));
+  (ui.$("url") as HTMLInputElement).focus();
+  assert.equal(ui.$("question").parentElement?.classList.contains("cursor-active"), false);
+  assert.match((ui.$("question").nextElementSibling as HTMLElement).style.left, /px$/);
 });
 
 test("browser page asks and runs /recap and /article from the ask line", async (t) => {
