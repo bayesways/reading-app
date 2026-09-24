@@ -9,9 +9,9 @@ export function browserPage(nonce: string): string {
 <meta name="referrer" content="no-referrer">
 <title>Pi Reader</title>
 <style nonce="${nonce}">
-:root{color-scheme:dark;--bg:#121212;--text:#e0e0e0;--bright:#fff;--muted:#a0a0a0;--faint:#5e5a52;--line:#333;--accent:#a8d1a8;--danger:#e39191;--mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+:root{color-scheme:dark;--bg:#121212;--text:#e0e0e0;--bright:#fff;--muted:#a0a0a0;--faint:#5e5a52;--line:#333;--accent:#a8d1a8;--danger:#e39191;--side:clamp(280px,28vw,380px);--mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
 *{box-sizing:border-box}[hidden]{display:none !important}
-body{margin:0;background:var(--bg);color:var(--text);font:16px/1.7 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased}
+body{margin:0;background:var(--bg);color:var(--text);font:16px/1.7 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased;padding-bottom:var(--dock,0)}
 .col{max-width:720px;margin:0 auto;padding:40px 20px 28px}
 input,textarea{font:inherit;line-height:inherit;color:inherit;background:none;border:0;padding:0;margin:0;width:100%;resize:none;outline:none}
 input::placeholder,textarea::placeholder{color:var(--faint)}
@@ -52,12 +52,17 @@ article hr{border:0;border-top:1px solid var(--line);margin:2em 0}
 .hint{position:fixed;top:0;left:0;z-index:2;appearance:none;font:.72rem var(--mono);color:var(--accent);background:var(--bg);border:1px solid var(--line);border-radius:4px;padding:2px 7px;white-space:nowrap;cursor:pointer}
 .hint:hover,.hint:focus-visible{color:var(--bright);border-color:var(--accent);outline:none}
 ::selection{background:rgba(168,209,168,.22)}
+/* easter egg: clicking the wordmark docks the ask line on the right instead. too narrow for two columns, it stays below. */
+@media(min-width:900px){body.side{padding-bottom:0;padding-right:var(--side)}
+.side .dock{top:0;left:auto;width:var(--side);overflow-y:auto;border-top:0;border-left:1px solid var(--line)}.side .dock::before{content:none}
+.side .bar{max-width:none;padding:40px 20px 18px}.side .ask{align-items:flex-start}.side #question{max-height:60vh}
+.side .quoted{flex-direction:column;gap:2px}.side .quoted .text{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:8;white-space:normal}}
 @media(max-width:600px){.col{padding:28px 16px 24px}.bar{padding:12px 16px 14px}h1{font-size:1.7rem}}
 </style>
 </head>
 <body>
 <div class="col">
-<div class="top"><span class="mark">reader</span><form id="loadForm"><input id="url" type="url" inputmode="url" list="pages" spellcheck="false" placeholder="paste a url, then press enter" aria-label="Article URL"></form><datalist id="pages"></datalist></div>
+<div class="top"><span class="mark" id="mark">reader</span><form id="loadForm"><input id="url" type="url" inputmode="url" list="pages" spellcheck="false" placeholder="paste a url, then press enter" aria-label="Article URL"></form><datalist id="pages"></datalist></div>
 <article id="article"></article>
 <section class="thread" id="thread" hidden></section>
 </div>
@@ -131,7 +136,8 @@ function showQuote(){$('quoted').hidden=!selected;$('quotedText').textContent='�
 function toBottom(){scrollTo({top:document.body.scrollHeight,behavior:'smooth'})}
 function grow(){const question=$('question');question.style.height='auto';question.style.height=question.scrollHeight+'px';dockSpace()}
 // The bar is fixed, so the column has to reserve its height to keep the last lines readable.
-function dockSpace(){document.body.style.paddingBottom=$('dock').offsetHeight+'px'}
+// As a sidebar the stylesheet reserves its width instead and ignores this.
+function dockSpace(){document.body.style.setProperty('--dock',$('dock').offsetHeight+'px')}
 async function refresh(){state=await api('state');render();if(!state.current)$('url').focus()}
 async function run(action,payload,item){const id=++requestId;busyId=id;pending=item||null;
 try{state={...state,busy:true,error:false,status:action==='summary'?'Summarizing your reading and discussion… Esc cancels.':action==='load'?'Loading article… Esc cancels.':'Asking your pi model… Esc cancels.'};render();if(item)toBottom();
@@ -203,13 +209,20 @@ function placeHint(){
   const rects=current?.range.getClientRects();
   const rect=rects?.[rects.length-1];
   hint.hidden=!rect;
-  if(rect)hint.style.transform='translate('+Math.round(Math.max(4,Math.min(rect.right+10,innerWidth-96)))+'px,'+Math.round(Math.max(4,rect.top))+'px)';
+  if(!rect)return;
+  // A sidebar covers the right of the window, so the hint stops at its edge; the bottom bar starts at 0.
+  const edge=$('dock').getBoundingClientRect().left||innerWidth;
+  hint.style.transform='translate('+Math.round(Math.max(4,Math.min(rect.right+10,edge-96)))+'px,'+Math.round(Math.max(4,rect.top))+'px)';
 }
 $('article').addEventListener('mouseup',captureSelection);$('article').addEventListener('keyup',captureSelection);
 // The hint is a button: pressing it must not collapse the selection it is about to explain.
 $('hint').addEventListener('mousedown',event=>event.preventDefault());
 $('hint').addEventListener('click',()=>{explain().catch(fail)});
-document.addEventListener('selectionchange',placeHint);addEventListener('scroll',placeHint,{passive:true});addEventListener('resize',placeHint);addEventListener('resize',dockSpace);
+document.addEventListener('selectionchange',placeHint);addEventListener('scroll',placeHint,{passive:true});addEventListener('resize',placeHint);addEventListener('resize',grow);
+// The easter egg: the wordmark moves the ask line into a right-hand sidebar, and back again.
+// Pressing it keeps the focus and selection, so a half-typed question or a selected passage survives.
+$('mark').addEventListener('mousedown',event=>event.preventDefault());
+$('mark').addEventListener('click',()=>{document.body.classList.toggle('side');grow();placeHint()});
 // Apart from the hint, every action is a keystroke: enter explains a selection, esc unwinds, any letter starts a question.
 addEventListener('keydown',event=>{const typing=event.target===$('question')||event.target===$('url');
 if(event.key==='Escape'){event.preventDefault();escape().catch(fail);return}

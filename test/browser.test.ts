@@ -279,7 +279,30 @@ test("browser page renders one column with no dropdowns or status bar", async (t
   assert.equal(dock.closest(".col"), null);
   assert.ok(dock.contains(document.getElementById("question")!) && dock.contains(document.getElementById("foot")!));
   assert.match(page, /\.dock\{[^}]*position:fixed[^}]*bottom:0/);
-  assert.match(document.body.style.paddingBottom, /px$/); // The column reserves the bar's height.
+  assert.match(page, /body\{[^}]*padding-bottom:var\(--dock/);
+  assert.match(document.body.style.getPropertyValue("--dock"), /px$/); // The column reserves the bar's height.
+});
+
+test("clicking the wordmark moves the ask line into a right-hand sidebar and back", async (t) => {
+  const page = browserPage("test-nonce");
+  // Only where two columns fit; a narrower window keeps the bar at the bottom.
+  assert.match(page, /@media\(min-width:900px\)\{body\.side\{padding-bottom:0;padding-right:var\(--side\)\}/);
+  assert.match(page, /\.side \.dock\{top:0;left:auto;width:var\(--side\)/);
+  const ui = await client(t);
+  const { body } = ui.window.document;
+  ui.type("question", "Half a question");
+  ui.$("question").focus();
+  // The press is cancelled, or it would take the focus and selection away from what it is moving.
+  const press = new ui.window.MouseEvent("mousedown", { bubbles: true, cancelable: true });
+  ui.$("mark").dispatchEvent(press);
+  assert.equal(press.defaultPrevented, true);
+  ui.$("mark").click();
+  assert.equal(body.classList.contains("side"), true);
+  assert.equal((ui.$("question") as HTMLTextAreaElement).value, "Half a question");
+  ui.$("mark").click();
+  assert.equal(body.classList.contains("side"), false);
+  assert.deepEqual(ui.calls.map(({ action }) => action), ["state"]); // A view switch is local; it never calls pi.
+  assert.deepEqual([...ui.window.document.querySelectorAll("button")].map((node) => node.id), ["hint"]); // Still hidden.
 });
 
 test("browser page asks and runs /recap and /article from the ask line", async (t) => {
