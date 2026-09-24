@@ -728,3 +728,37 @@ test("browser selection capture and hint accept article text and reject outside 
   assert.equal(ui.$("hint").hidden, true);
   assert.equal(ui.calls.length, before);
 });
+
+test("text in a previous answer can be selected, explained and asked about like article text", async (t) => {
+  const ui = await client(t);
+  const { document } = ui.window;
+  const selection = ui.window.getSelection()!;
+  const select = async (node: Node) => {
+    const range = document.createRange();
+    range.selectNodeContents(node);
+    range.getClientRects = () => [{ right: 100, top: 20 }] as unknown as DOMRectList;
+    selection.removeAllRanges();
+    selection.addRange(range);
+    document.dispatchEvent(new ui.window.Event("selectionchange"));
+    ui.$("thread").dispatchEvent(new ui.window.MouseEvent("mouseup", { bubbles: true }));
+    await ui.settle();
+  };
+  // The question line and its quoted passage are not answer text.
+  const before = ui.calls.length;
+  await select(document.querySelector("#thread .q")!);
+  await select(document.querySelector("#thread blockquote")!);
+  assert.equal(ui.calls.length, before);
+  assert.equal(ui.$("hint").hidden, true);
+
+  await select(document.querySelector("#thread .a p")!.firstChild!);
+  assert.deepEqual(ui.calls.at(-1), { action: "select", body: { selection: "Because." } });
+  assert.equal(ui.$("hint").hidden, false);
+  assert.match(ui.$("quotedText").textContent!, /Because\./);
+  await ui.press("Enter");
+  assert.deepEqual(ui.calls.at(-1), { action: "explain", body: { selection: "Because." } });
+
+  await select(document.querySelector("#thread .a p")!.firstChild!);
+  ui.type("question", "Why does that follow?");
+  await ui.submit("askForm");
+  assert.deepEqual(ui.calls.at(-1), { action: "ask", body: { question: "Why does that follow?", selection: "Because." } });
+});
