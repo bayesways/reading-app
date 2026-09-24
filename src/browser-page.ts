@@ -129,7 +129,7 @@ function fail(error){state={...state,busy:false,error:true,status:error.message}
 function withoutTitle(text,title){const m=(text||'').match(/^#\s+(.+)\n?/);return m&&m[1].trim().toLowerCase()===(title||'').trim().toLowerCase()?text.slice(m[0].length):text}
 function note(text,extra){const p=document.createElement('p');p.className='label'+(extra?' '+extra:'');p.textContent=text;return p}
 function exchange(number,question,quote,answer,sourceUrl){const box=document.createElement('section');box.className='ex'+(answer?'':' waiting');const q=document.createElement('p');q.className='q';const n=document.createElement('span');n.className='n';n.textContent='Q'+number;q.append(n,document.createTextNode(question));box.append(q);if(quote){const blockquote=document.createElement('blockquote');blockquote.textContent=quote;box.append(blockquote)}const body=document.createElement('div');if(answer){body.className='a';markdown(answer,body,sourceUrl)}else body.append(note('waiting for your model… esc cancels'));box.append(body);return box}
-function footer(){if(!state)return'';if(state.busy||state.error||flash)return state.status;const pages=state.pages.length;return [state.model,'in memory',pages?pages+' page'+(pages===1?'':'s'):'no pages'].join(' · ')}
+function footer(){if(!state)return'';if(state.busy||state.error||flash)return state.status;return state.model}
 function flashStatus(){clearTimeout(flashTimer);flash=1;flashTimer=setTimeout(()=>{flash=0;render()},6000)}
 function render(){if(!state)return;const current=state.current;$('dock').hidden=!current;
 restoreDraft(current?.article.url || '');

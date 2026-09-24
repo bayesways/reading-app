@@ -279,7 +279,7 @@ test("browser page renders one column with no dropdowns or status bar", async (t
   assert.doesNotMatch(document.querySelector("article")!.textContent!, /^Annealing\s*Annealing/); // Title is not repeated.
   assert.match(document.getElementById("thread")!.textContent!, /Q1Why\?/);
   assert.match(document.getElementById("thread")!.textContent!, /worse moves/);
-  assert.equal(document.getElementById("foot")!.textContent, "provider/model · in memory · 1 page");
+  assert.equal(document.getElementById("foot")!.textContent, "provider/model");
   assert.equal((document.getElementById("url") as HTMLInputElement).value, "https://example.com/a");
   // The ask line and its foot are a bar fixed to the window, not the tail of a long article.
   const dock = document.getElementById("dock")!;
