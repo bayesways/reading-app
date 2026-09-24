@@ -14,6 +14,7 @@ export interface Reading {
 }
 export type ReplyKind = "question" | "summary";
 export type Answer = (reading: Reading, question: string, kind: ReplyKind, signal: AbortSignal, selection?: string) => Promise<string>;
+type ResolveInput = (input: string) => Promise<string>;
 
 /** All state is local to this extension instance. Nothing is appended to pi's session. */
 export class ReaderState {
@@ -28,7 +29,11 @@ export class ReaderState {
   private operation?: AbortController;
   onChange: () => void = () => {};
 
-  constructor(private answer: Answer, private loadArticle = loadSource) {}
+  constructor(
+    private answer: Answer,
+    private loadArticle = loadSource,
+    private resolveInput: ResolveInput = resolveSource,
+  ) {}
 
   get busy(): boolean { return !!this.operation; }
 
@@ -64,21 +69,20 @@ export class ReaderState {
   }
 
   async load(input: string): Promise<boolean> {
-    let key: string;
-    try { key = await resolveSource(input); }
-    catch (error) { this.notify((error as Error).message, true); return false; }
     this.cancel();
-    const cached = this.readings.get(this.aliases.get(key) ?? key);
-    if (cached) {
-      this.current = cached;
-      this.showingSummary = false;
-      this.notify("Restored this page's in-memory discussion.");
-      return true;
-    }
     const operation = new AbortController();
     this.operation = operation;
-    this.notify("Loading article… Esc cancels.");
+    this.notify("Loading source… Esc cancels.");
     try {
+      const key = await this.resolveInput(input);
+      if (this.operation !== operation) return false;
+      const cached = this.readings.get(this.aliases.get(key) ?? key);
+      if (cached) {
+        this.current = cached;
+        this.showingSummary = false;
+        this.notify("Restored this source's in-memory discussion.");
+        return true;
+      }
       const article = await this.loadArticle(key, operation.signal);
       if (this.operation !== operation) return false;
       const reading = this.readings.get(article.url) ?? {
@@ -88,10 +92,10 @@ export class ReaderState {
       this.aliases.set(key, article.url);
       this.current = reading;
       this.showingSummary = false;
-      this.notify(article.warning ?? "Article ready. Tab to the question box to ask about this page.");
+      this.notify(article.warning ?? "Source ready. Tab to the question box to ask about this source.");
       return true;
     } catch (error) {
-      if (this.operation === operation) this.notify(`Could not load page: ${(error as Error).message}`, true);
+      if (this.operation === operation) this.notify(`Could not load source: ${(error as Error).message}`, true);
       return false;
     } finally {
       if (this.operation === operation) {
@@ -107,7 +111,7 @@ export class ReaderState {
     this.cancel();
     this.current = pages[(pages.indexOf(this.current!) + 1) % pages.length];
     this.showingSummary = false;
-    this.notify("Switched page. Questions and answers are scoped to this URL.");
+    this.notify("Switched source. Questions and answers are scoped to this source.");
   }
 
   async explainSelection(): Promise<boolean> {

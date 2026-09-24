@@ -134,7 +134,7 @@ function grow(){const question=$('question');question.style.height='auto';questi
 function dockSpace(){document.body.style.paddingBottom=$('dock').offsetHeight+'px'}
 async function refresh(){state=await api('state');render();if(!state.current)$('url').focus()}
 async function run(action,payload,item){const id=++requestId;busyId=id;pending=item||null;
-try{state={...state,busy:true,error:false,status:action==='summary'?'Summarizing your reading and discussion… Esc cancels.':action==='load'?'Loading article… Esc cancels.':'Asking your pi model… Esc cancels.'};render();if(item)toBottom();
+try{state={...state,busy:true,error:false,status:action==='summary'?'Summarizing your reading and discussion… Esc cancels.':action==='load'?'Loading source… Esc cancels.':'Asking your pi model… Esc cancels.'};render();if(item)toBottom();
 const result=await api(action,payload);
 if(id===requestId){pending=null;state=result;selected=state.current?.selection||'';render();flashStatus();if(item)toBottom()}
 // Loading another page supersedes a request the server still finished; only Escape undoes it.

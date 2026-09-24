@@ -194,7 +194,7 @@ test("reader command parser makes browser mode explicit", () => {
 
 function fixture(): BrowserSnapshot {
   return {
-    model: "provider/model", status: "Article ready. Type below to ask about this page.", error: false, busy: false,
+    model: "provider/model", status: "Source ready. Type below to ask about this source.", error: false, busy: false,
     showingSummary: false, pages: [{ url: "https://example.com/a", title: "Annealing" }],
     current: {
       article: { url: "https://example.com/a", title: "Annealing", markdown: "# Annealing\n\nBody text." },
@@ -659,7 +659,7 @@ test("browser page shows the URL it is loading, not the page that is still on sc
   ui.type("url", "https://example.com/b");
   await ui.submit("loadForm");
   assert.deepEqual(ui.calls.at(-1), { action: "load", body: { url: "https://example.com/b" } });
-  assert.match(ui.$("foot").textContent!, /Loading article/);
+  assert.match(ui.$("foot").textContent!, /Loading source/);
   assert.equal((ui.$("url") as HTMLInputElement).value, "https://example.com/b");
   await ui.press("Escape"); // Cancelling puts the URL of the article still on screen back.
   assert.equal(ui.calls.at(-1)!.action, "cancel");
@@ -680,7 +680,7 @@ test("a cancelled load cannot clear a retry's loading indicator or duplicate gua
   first(fixture()); // The cancelled response arrives after a retry of the same URL starts.
   await ui.settle();
   assert.equal((ui.$("url") as HTMLInputElement).value, url);
-  assert.match(ui.$("foot").textContent!, /Loading article/);
+  assert.match(ui.$("foot").textContent!, /Loading source/);
 
   await ui.submit("loadForm");
   assert.equal(ui.calls.filter(({ action }) => action === "load").length, 2);

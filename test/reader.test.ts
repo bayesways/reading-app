@@ -89,6 +89,22 @@ test("stale page loads cannot replace newer pages", async () => {
   assert.equal(state.current!.article.url, "https://example.com/new");
 });
 
+test("stale path resolution cannot cancel or replace a newer load", async () => {
+  const oldKey = deferred<string>();
+  const state = new ReaderState(
+    answer,
+    load,
+    (input) => input.endsWith("/old") ? oldKey.promise : Promise.resolve(input),
+  );
+  const request = state.load("https://example.com/old");
+  assert.equal(state.busy, true);
+  await state.load("https://example.com/new");
+  oldKey.resolve("https://example.com/old");
+  assert.equal(await request, false);
+  assert.equal(state.current!.article.url, "https://example.com/new");
+  assert.equal(state.busy, false);
+});
+
 test("model failures retain drafts and do not add incomplete exchanges", async () => {
   const state = new ReaderState(async () => { throw new Error("No authentication"); }, load);
   await state.load("https://example.com");

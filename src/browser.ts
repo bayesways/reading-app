@@ -30,7 +30,7 @@ export interface BrowserReaderOptions { launch?: (url: string) => Promise<void> 
 
 function browserStatus(status: string): string {
   return status
-    .replace("Tab to the question box to ask about this page.", "Type below to ask about this page.")
+    .replace("Tab to the question box to ask about this source.", "Type below to ask about this source.")
     .replace("F3 switches back to the article.", "Type /article to return to the page.")
     .replace("F2 summarizes your learnings so far.", "Type /recap to summarize your learnings.")
     .replace("click/drag in fullscreen, or press v in the article.", "select text in the article first.");
