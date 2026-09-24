@@ -610,6 +610,57 @@ test("the explain hint is a button that explains the live selection on click", a
   assert.equal(ui.$("quoted").hidden, true);
 });
 
+test("clearing a quote with Escape scrolls back to the passage it came from", async (t) => {
+  const markdown = "# Annealing\n\nEarly on it takes worse moves.\n\nFiller.\n\nLate in the run, worse\nmoves are rare.";
+  // jsdom has no layout: each article paragraph sits at the top given here, by index.
+  const layout = async (snapshot: BrowserSnapshot, tops: number[]) => {
+    const ui = await client(t, snapshot);
+    const scrolls: unknown[] = [];
+    ui.window.scrollTo = ((options: object) => { scrolls.push({ ...options }); }) as typeof ui.window.scrollTo;
+    ui.window.Range.prototype.getBoundingClientRect = function (this: Range) {
+      const top = tops[[...ui.$("article").querySelectorAll("p")].indexOf(this.startContainer.parentElement as HTMLParagraphElement)];
+      return { top, bottom: top + 20 } as DOMRect;
+    };
+    return { ui, scrolls, third: ui.window.innerHeight / 3 };
+  };
+  const select = async (ui: Awaited<ReturnType<typeof client>>, paragraph: number) => {
+    const node = ui.$("article").querySelectorAll("p")[paragraph];
+    const text = node.firstChild as Text;
+    const range = ui.window.document.createRange();
+    range.setStart(text, text.data.indexOf("worse"));
+    range.setEnd(node, node.childNodes.length);
+    ui.window.getSelection()!.removeAllRanges();
+    ui.window.getSelection()!.addRange(range);
+    ui.$("article").dispatchEvent(new ui.window.MouseEvent("mouseup", { bubbles: true }));
+    await ui.settle();
+  };
+
+  // The words repeat; the scroll goes to the occurrence that was selected, though the
+  // article was rebuilt in between and the quote's line break is not in the page text.
+  let snapshot = fixture();
+  snapshot.current!.article.markdown = markdown;
+  let { ui, scrolls, third } = await layout(snapshot, [900, 1900, 2900]);
+  await select(ui, 2);
+  assert.match(ui.$("quotedText").textContent!, /worse moves are rare/);
+  await ui.press("Escape");
+  assert.equal(ui.$("quoted").hidden, true);
+  assert.deepEqual(scrolls, [{ top: 2900 - third, behavior: "smooth" }]);
+
+  // A passage already on screen stays put.
+  ({ ui, scrolls } = await layout(snapshot, [100, 1900, 2900]));
+  await select(ui, 0);
+  await ui.press("Escape");
+  assert.deepEqual(scrolls, []);
+
+  // A quote attached in another tab has no selected position, so its first match is used.
+  snapshot = fixture();
+  snapshot.current!.article.markdown = markdown;
+  snapshot.current!.selection = "worse moves";
+  ({ ui, scrolls } = await layout(snapshot, [900, 1900, 2900]));
+  await ui.press("Escape");
+  assert.deepEqual(scrolls, [{ top: 900 - third, behavior: "smooth" }]);
+});
+
 test("browser page only reopens a saved URL when selected from the URL list", async (t) => {
   const snapshot = fixture();
   snapshot.pages.push({ url: "https://example.com/b", title: "Another page" });
