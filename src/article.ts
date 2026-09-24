@@ -72,7 +72,7 @@ export async function resolveSource(value: string, cwd = process.cwd()): Promise
     try { path = fileURLToPath(input); }
     catch { throw new Error("That file URL is not valid. Use file:///absolute/path."); }
   } else if (looksLikePath(input)) {
-    path = input.replace(/^~(?=[\/]|$)/, homedir());
+    path = input.replace(/^~(?=[\\/]|$)/, homedir());
   } else if (input && !/^[a-z][a-z\d+.-]*:\/\//i.test(input) && await exists(resolve(cwd, input))) {
     path = input; // A bare relative path such as docs/paper.pdf, only when it exists.
   }

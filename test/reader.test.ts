@@ -105,6 +105,36 @@ test("stale path resolution cannot cancel or replace a newer load", async () => 
   assert.equal(state.busy, false);
 });
 
+test("invalid or failed path resolution leaves a running answer alone", async () => {
+  const reply = deferred<string>();
+  const state = new ReaderState(async () => reply.promise, load, async (input) => {
+    if (input.startsWith("ftp:")) throw new Error("Only HTTP and HTTPS pages are supported.");
+    return input;
+  });
+  await state.load("https://example.com/a");
+  const asking = state.ask("Why?");
+  assert.equal(await state.load("ftp://typo"), false);
+  assert.equal(state.error, true);
+  assert.match(state.status, /Only HTTP/);
+  assert.equal(state.busy, true);
+  reply.resolve("Because.");
+  assert.equal(await asking, true);
+  assert.equal(state.current!.exchanges[0].answer, "Because.");
+  assert.equal(state.busy, false);
+});
+
+test("cancelling during path resolution drops the pending load", async () => {
+  const key = deferred<string>();
+  const state = new ReaderState(answer, load, () => key.promise);
+  const request = state.load("./paper.pdf");
+  assert.equal(state.busy, true);
+  state.cancel();
+  assert.equal(state.busy, false);
+  key.resolve("file:///paper.pdf");
+  assert.equal(await request, false);
+  assert.equal(state.current, undefined);
+});
+
 test("model failures retain drafts and do not add incomplete exchanges", async () => {
   const state = new ReaderState(async () => { throw new Error("No authentication"); }, load);
   await state.load("https://example.com");

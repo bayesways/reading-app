@@ -27,6 +27,10 @@ export class ReaderState {
   pendingQuestion = "";
   pendingSelection?: string;
   private operation?: AbortController;
+  // Counts load requests so a slow path lookup can't replace a newer load. Resolving an input
+  // cancels nothing: a mistyped URL or missing file must not abort a running answer.
+  private loadGeneration = 0;
+  private resolving = false;
   onChange: () => void = () => {};
 
   constructor(
@@ -35,7 +39,7 @@ export class ReaderState {
     private resolveInput: ResolveInput = resolveSource,
   ) {}
 
-  get busy(): boolean { return !!this.operation; }
+  get busy(): boolean { return !!this.operation || this.resolving; }
 
   private notify(message: string, error = false): void {
     this.status = cleanText(message);
@@ -52,6 +56,8 @@ export class ReaderState {
   }
 
   cancel(): void {
+    this.loadGeneration++;
+    this.resolving = false;
     const operation = this.operation;
     this.operation = undefined;
     operation?.abort();
@@ -69,13 +75,23 @@ export class ReaderState {
   }
 
   async load(input: string): Promise<boolean> {
+    const generation = ++this.loadGeneration;
+    this.resolving = true;
+    let key: string;
+    try { key = await this.resolveInput(input); }
+    catch (error) {
+      if (generation !== this.loadGeneration) return false;
+      this.resolving = false;
+      this.notify((error as Error).message, true);
+      return false;
+    }
+    if (generation !== this.loadGeneration) return false;
+    this.resolving = false;
     this.cancel();
     const operation = new AbortController();
     this.operation = operation;
     this.notify("Loading source… Esc cancels.");
     try {
-      const key = await this.resolveInput(input);
-      if (this.operation !== operation) return false;
       const cached = this.readings.get(this.aliases.get(key) ?? key);
       if (cached) {
         this.current = cached;
