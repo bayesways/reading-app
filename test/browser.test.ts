@@ -298,8 +298,8 @@ test("browser landing page is empty until a source loads, then focuses the ask l
   assert.equal(ui.window.document.activeElement, ui.$("url"));
   assert.match(page, /\.field input,.field textarea\{caret-color:transparent\}/);
   assert.match(page, /\.field-cursor\{[^}]*width:8px/);
-  assert.match(page, /\.ask-field \.field-cursor\{[^}]*background:var\(--accent\);animation:ask-cursor-rhythm 6s/);
-  assert.match(page, /@keyframes ask-cursor-rhythm\{0%,8\.2%\{opacity:1\}[^}]*8\.3%,16\.5%\{opacity:0\}/);
+  assert.match(page, /\.ask-field \.field-cursor\{[^}]*background:var\(--accent\);animation:cursor-pulse 2\.8s ease-in-out/);
+  assert.match(page, /@keyframes cursor-pulse\{0%,100%\{opacity:\.12\}50%\{opacity:\.42\}\}/);
   assert.ok(ui.$("url").parentElement?.classList.contains("cursor-active"));
 
   const loaded = ui.deferNext();
