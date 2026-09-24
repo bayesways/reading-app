@@ -57,7 +57,7 @@ article hr{border:0;border-top:1px solid var(--line);margin:2em 0}
 </head>
 <body>
 <div class="col">
-<div class="top"><span class="mark">reader</span><form id="loadForm"><input id="url" type="url" inputmode="url" list="pages" spellcheck="false" placeholder="paste a url, then press enter" aria-label="Article URL"></form><datalist id="pages"></datalist></div>
+<div class="top"><span class="mark">reader</span><form id="loadForm"><input id="url" type="text" list="pages" spellcheck="false" autocomplete="off" placeholder="paste a url or file path, then press enter" aria-label="Article URL or file path"></form><datalist id="pages"></datalist></div>
 <article id="article"></article>
 <section class="thread" id="thread" hidden></section>
 </div>
@@ -119,7 +119,7 @@ const body=$('article');body.replaceChildren();
 if(current){const h1=document.createElement('h1');h1.textContent=current.article.title;body.append(h1);
 if(mode==='summary'){body.append(note('recap · type /article to return to the page','recap'));const recap=document.createElement('div');markdown(current.summary||'*No recap yet. Type /recap to make one.*',recap,current.article.url);body.append(recap)}
 else{if(current.article.warning)body.append(note(current.article.warning));const text=document.createElement('div');markdown(withoutTitle(current.article.markdown,current.article.title),text,current.article.url);body.append(text)}}
-else body.append(note('paste a url above to begin. nothing is saved; everything lives in this session.'));
+else body.append(note('paste a url or file path above to begin. nothing is saved; everything lives in this session.'));
 const thread=$('thread');thread.replaceChildren();const exchanges=current?current.exchanges:[];
 exchanges.forEach((item,index)=>thread.append(exchange(index+1,item.question,item.selection,item.answer,current?.article.url)));
 if(pending)thread.append(exchange(exchanges.length+1,pending.question,pending.selection,''));

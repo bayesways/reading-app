@@ -3,22 +3,38 @@
   "version": "0.1.0",
   "description": "An in-memory terminal and local-browser article reader with per-URL Q&A for pi",
   "type": "module",
-  "keywords": ["pi-package"],
-  "files": ["src", "bin", "README.md", "reader.config.json"],
-  "bin": { "pi-reader": "./bin/pi-reader.mjs" },
-  "pi": { "extensions": ["./src/index.ts"] },
+  "keywords": [
+    "pi-package"
+  ],
+  "files": [
+    "src",
+    "bin",
+    "README.md",
+    "reader.config.json"
+  ],
+  "bin": {
+    "pi-reader": "./bin/pi-reader.mjs"
+  },
+  "pi": {
+    "extensions": [
+      "./src/index.ts"
+    ]
+  },
   "scripts": {
     "start": "node ./bin/pi-reader.mjs",
     "check": "tsc --noEmit",
     "test": "tsx --test test/*.test.ts"
   },
-  "engines": { "node": ">=22" },
+  "engines": {
+    "node": ">=22"
+  },
   "dependencies": {
     "@mozilla/readability": "^0.6.0",
     "jsdom": "^26.1.0",
     "markdown-it": "^15.0.2",
     "tsx": "^4.20.0",
-    "turndown": "^7.2.0"
+    "turndown": "^7.2.0",
+    "unpdf": "^1.8.1"
   },
   "peerDependencies": {
     "@earendil-works/pi-ai": "*",

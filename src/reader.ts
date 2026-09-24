@@ -1,5 +1,5 @@
 import type { Article } from "./article.ts";
-import { cleanText, fetchArticle, normalizeUrl } from "./article.ts";
+import { cleanText, loadSource, resolveSource } from "./article.ts";
 
 export interface Exchange { question: string; answer: string; selection?: string }
 export interface Reading {
@@ -21,14 +21,14 @@ export class ReaderState {
   private aliases = new Map<string, string>();
   current?: Reading;
   showingSummary = false;
-  status = "Paste a URL above to begin. Article text is sent to your pi model only when you ask or summarize.";
+  status = "Paste a URL or file path above to begin. Article text is sent to your pi model only when you ask or summarize.";
   error = false;
   pendingQuestion = "";
   pendingSelection?: string;
   private operation?: AbortController;
   onChange: () => void = () => {};
 
-  constructor(private answer: Answer, private loadArticle = fetchArticle) {}
+  constructor(private answer: Answer, private loadArticle = loadSource) {}
 
   get busy(): boolean { return !!this.operation; }
 
@@ -65,7 +65,7 @@ export class ReaderState {
 
   async load(input: string): Promise<boolean> {
     let key: string;
-    try { key = normalizeUrl(input); }
+    try { key = await resolveSource(input); }
     catch (error) { this.notify((error as Error).message, true); return false; }
     this.cancel();
     const cached = this.readings.get(this.aliases.get(key) ?? key);

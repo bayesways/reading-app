@@ -35,7 +35,7 @@ export function parseCliArgs(args: string[]): CliOptions {
     } else if (argument.startsWith("-")) throw new Error(`Unknown option: ${argument}`);
     else positional.push(argument);
   }
-  if (positional.length > 1) throw new Error("Provide at most one article URL.");
+  if (positional.length > 1) throw new Error("Provide at most one article URL or file path.");
   return { articleUrl: positional[0] ?? "", configPath, openBrowser, help };
 }
 
@@ -77,7 +77,7 @@ export async function resolveStandaloneSelection(
 export const CLI_HELP = `Pi Reader — browser reading workspace backed by pi
 
 Usage:
-  pi-reader [options] [article-url]
+  pi-reader [options] [url-or-path]
 
 Options:
   --config PATH  Use another config file (default: ${READER_CONFIG_PATH})
