@@ -1,9 +1,40 @@
 import assert from "node:assert/strict";
+import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
+import { homedir, tmpdir } from "node:os";
+import { join, relative } from "node:path";
 import { test } from "node:test";
-import { cleanText, extractArticle, fetchArticle, MAX_PAGE_BYTES, normalizeUrl } from "../src/article.ts";
+import { pathToFileURL } from "node:url";
+import {
+  cleanText, extractArticle, fetchArticle, loadSource, MAX_PAGE_BYTES, MAX_PDF_BYTES, normalizeUrl, resolveSource,
+} from "../src/article.ts";
 
 const paragraph = "Bayesian inference updates prior beliefs using observed evidence. The posterior combines the likelihood and prior, with a normalizing constant. Uncertainty is represented using probability distributions rather than just a single estimate.";
+/** A minimal valid PDF whose pages each draw the given lines of text (no lines: no text layer). */
+function makePdf(pages: string[][], title?: string): Buffer {
+  const objects: string[] = [];
+  const add = (body: string) => objects.push(body) - 1 + 1;
+  const catalog = add("");
+  const tree = add("");
+  const font = add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+  const kids = pages.map((lines) => {
+    const text = lines.map((line, i) => `BT /F1 12 Tf 72 ${720 - i * 16} Td (${line.replace(/[()\\]/g, "\\$&")}) Tj ET`).join("\n");
+    const content = add(`<< /Length ${Buffer.byteLength(text)} >>\nstream\n${text}\nendstream`);
+    return add(`<< /Type /Page /Parent ${tree} 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 ${font} 0 R >> >> /Contents ${content} 0 R >>`);
+  });
+  objects[catalog - 1] = `<< /Type /Catalog /Pages ${tree} 0 R >>`;
+  objects[tree - 1] = `<< /Type /Pages /Kids [${kids.map((k) => `${k} 0 R`).join(" ")}] /Count ${kids.length} >>`;
+  const info = title ? add(`<< /Title (${title}) >>`) : 0;
+  let out = "%PDF-1.4\n";
+  const offsets = objects.map((body, i) => { const at = Buffer.byteLength(out); out += `${i + 1} 0 obj\n${body}\nendobj\n`; return at; });
+  const xref = Buffer.byteLength(out);
+  out += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n${offsets.map((o) => `${String(o).padStart(10, "0")} 00000 n \n`).join("")}`;
+  out += `trailer\n<< /Size ${objects.length + 1} /Root ${catalog} 0 R${info ? ` /Info ${info} 0 R` : ""} >>\nstartxref\n${xref}\n%%EOF\n`;
+  return Buffer.from(out, "latin1");
+}
+
+const pdf = makePdf([["Bayesian inference updates prior", "beliefs using evidence."], ["# 3 is not a heading"]], "Priors and posteriors");
+
 const html = `<html><head><title>A Bayesian introduction</title></head><body><nav>Home</nav><article><h1>Updating beliefs</h1><p>${paragraph}</p><h2>Evidence</h2><p>${paragraph}</p><a href="/more">More reading</a><a href="javascript:alert(1)">Bad link</a><img src="/tracker" alt="Posterior plot"><script>globalThis.readerExecuted = true</script></article></body></html>`;
 
 test("URLs are canonicalized without collapsing meaningful queries", () => {
@@ -42,7 +73,11 @@ test("HTTP fetch: redirect, plain text, errors, size limits, timeout cancellatio
       case "/unsafe": res.writeHead(302, { location: "file:///tmp/page" }); res.end(); break;
       case "/article": res.setHeader("content-type", "text/html; charset=utf-8"); res.end(html); break;
       case "/text": res.setHeader("content-type", "text/plain"); res.end(paragraph); break;
-      case "/pdf": res.setHeader("content-type", "application/pdf"); res.end("fake pdf"); break;
+      case "/pdf": res.setHeader("content-type", "application/pdf"); res.end(pdf); break;
+      case "/download": res.setHeader("content-type", "application/octet-stream"); res.end(pdf); break;
+      case "/binary": res.setHeader("content-type", "application/octet-stream"); res.end("not a pdf"); break;
+      case "/zip": res.setHeader("content-type", "application/zip"); res.end("PK"); break;
+      case "/bigpdf": res.setHeader("content-type", "application/pdf"); res.setHeader("content-length", MAX_PDF_BYTES + 1); res.end(); break;
       case "/big": res.setHeader("content-length", MAX_PAGE_BYTES + 1); res.end(); break;
       case "/chunked": res.setHeader("content-type", "text/plain"); res.write("x".repeat(MAX_PAGE_BYTES)); res.end("extra"); break;
       case "/wait": break;
@@ -57,12 +92,79 @@ test("HTTP fetch: redirect, plain text, errors, size limits, timeout cancellatio
   try {
     assert.equal((await fetchArticle(`${base}/redirect`, signal)).url, `${base}/article`);
     assert.equal((await fetchArticle(`${base}/text`, signal)).markdown, paragraph);
-    for (const [path, error] of [["/pdf", /Unsupported/], ["/big", /2 MiB/], ["/chunked", /2 MiB/], ["/loop", /too many/], ["/unsafe", /HTTP/], ["/denied", /403/]] as const) {
+    for (const path of ["/pdf", "/download"]) {
+      const article = await fetchArticle(base + path, signal);
+      assert.equal(article.title, "Priors and posteriors");
+      assert.match(article.markdown, /Bayesian inference updates prior beliefs using evidence\./);
+    }
+    for (const [path, error] of [["/zip", /Unsupported/], ["/binary", /Unsupported/], ["/bigpdf", /25 MiB/], ["/big", /2 MiB/], ["/chunked", /2 MiB/], ["/loop", /too many/], ["/unsafe", /HTTP/], ["/denied", /403/]] as const) {
       await assert.rejects(fetchArticle(base + path, signal), error);
     }
     await assert.rejects(fetchArticle(`${base}/wait`, AbortSignal.timeout(30)), /timeout|abort/i);
   } finally {
     sockets.forEach((s) => s.destroy());
     await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
+
+test("PDF text keeps page markers and escapes Markdown syntax; text-less PDFs fail clearly", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "reader-pdf-"));
+  const signal = new AbortController().signal;
+  try {
+    await writeFile(join(dir, "paper.pdf"), pdf);
+    await writeFile(join(dir, "scan.pdf"), makePdf([[]]));
+    await writeFile(join(dir, "broken.pdf"), "%PDF-1.4 nonsense");
+    const article = await loadSource(await resolveSource(join(dir, "paper.pdf")), signal);
+    assert.equal(article.title, "Priors and posteriors");
+    assert.match(article.markdown, /^\*\*Page 1\*\*/);
+    assert.match(article.markdown, /\*\*Page 2\*\*\n\n\\# 3 is not a heading/);
+    const untitled = await loadSource(pathToFileURL(join(dir, "scan.pdf")).href, signal).catch((error: Error) => error);
+    assert.match(String(untitled), /no extractable text/);
+    await assert.rejects(loadSource(pathToFileURL(join(dir, "broken.pdf")).href, signal), /PDF/);
+    await assert.rejects(loadSource(pathToFileURL(join(dir, "paper.pdf")).href, AbortSignal.abort()), /abort/i);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("local paths resolve to one canonical file URL and only readable document types load", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "reader-local-"));
+  const signal = new AbortController().signal;
+  try {
+    const page = join(dir, "page.html");
+    await writeFile(page, html.replace('href="/more"', 'href="notes.html"').replace("<title>A Bayesian introduction</title>", ""));
+    await writeFile(join(dir, "notes.txt"), paragraph);
+    await writeFile(join(dir, "tool.exe"), "binary");
+    await writeFile(join(dir, "huge.html"), "x".repeat(MAX_PAGE_BYTES + 1));
+    await mkdir(join(dir, "folder.html"));
+    await symlink(join(dir, "tool.exe"), join(dir, "alias.html"));
+    const key = await resolveSource(page);
+    assert.match(key, /^file:\/\/.*\/page\.html$/);
+    for (const spelling of [pathToFileURL(page).href, `  ${page}  `, join(dir, ".", "page.html")]) {
+      assert.equal(await resolveSource(spelling), key);
+    }
+    assert.equal(await resolveSource("./page.html", dir), key);
+    assert.equal(await resolveSource("page.html", dir), key);
+    if (page.startsWith(homedir())) assert.equal(await resolveSource(`~/${relative(homedir(), page)}`), key);
+    // A bare name that isn't on disk is still a web address.
+    assert.equal(await resolveSource("example.com/x", dir), "https://example.com/x");
+
+    const article = await loadSource(key, signal);
+    assert.equal(article.title, "page.html");
+    assert.match(article.markdown, /## Evidence/);
+    assert.doesNotMatch(article.markdown, /file:|notes\.html\)/);
+    const text = await loadSource(await resolveSource(join(dir, "notes.txt")), signal);
+    assert.deepEqual([text.title, text.markdown], ["notes.txt", paragraph]);
+
+    for (const [input, error] of [
+      [join(dir, "missing.pdf"), /not found/], [join(dir, "tool.exe"), /Unsupported file type/],
+      [join(dir, "folder.html"), /Not a file/], [join(dir, "alias.html"), /Unsupported file type/],
+      ["file://remote-host/share/a.pdf", /file URL/],
+    ] as const) {
+      await assert.rejects(resolveSource(input), error);
+    }
+    await assert.rejects(loadSource(await resolveSource(join(dir, "huge.html")), signal), /2 MiB/);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
   }
 });

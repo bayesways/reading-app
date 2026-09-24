@@ -31,7 +31,7 @@ function markdownTheme(theme: Theme): MarkdownTheme {
 
 /** Full-window overlay. Each pane has an independent, width-aware Markdown viewport. */
 export class ReaderView implements Component, Focusable {
-  private urlInput = new Input({ prompt: "", placeholder: "https://…" });
+  private urlInput = new Input({ prompt: "", placeholder: "https://… or /path/to/file.pdf" });
   private questionInput = new Input({ prompt: "? ", placeholder: "Ask about this article…" });
   private leftMarkdown: Markdown;
   private rightMarkdown: Markdown;
@@ -359,7 +359,7 @@ export class ReaderView implements Component, Focusable {
     const summary = this.state.showingSummary && !!reading?.summary;
     const articleText = reading
       ? summary ? reading.summary : `# ${reading.article.title}\n\n${reading.article.markdown}`
-      : "# A little room to read\n\nPaste an article URL into the bar above and press Enter.\n\nRead on the left; explore your questions on the right.\n\n**F2** turns your discussion into a learning recap.\n\nNothing is saved to your pi session. Close and reopen /reader to return during this session.\n\nHTML and plain text only. No browser scripts, logins, or PDFs.";
+      : "# A little room to read\n\nPaste an article URL or a local .html/.pdf path into the bar above and press Enter.\n\nRead on the left; explore your questions on the right.\n\n**F2** turns your discussion into a learning recap.\n\nNothing is saved to your pi session. Close and reopen /reader to return during this session.\n\nWeb pages, PDFs, and local HTML/PDF files. No browser scripts or logins.";
     let chat = reading?.exchanges.map((exchange, i) => `### Q${i + 1}: ${exchange.question}\n\n${exchange.selection ? `Selected passage:\n\n${quote(exchange.selection)}\n\n` : ""}${exchange.answer}`).join("\n\n---\n\n")
       || "## Your questions\n\nAsk for an explanation, challenge an argument, or connect an idea to something you know.\n\nAnswers use this article and this URL's discussion only.\n\nTab to the question box below. Enter sends.";
     if (this.state.pendingQuestion) chat += `\n\n---\n\n**Pending:** ${this.state.pendingQuestion}\n\n${this.state.pendingSelection ? `${quote(this.state.pendingSelection)}\n\n` : ""}*Working… Esc cancels.*`;

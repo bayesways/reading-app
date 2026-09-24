@@ -1,3 +1,7 @@
+import { realpath, readFile, stat } from "node:fs/promises";
+import { homedir } from "node:os";
+import { basename, extname, isAbsolute, resolve } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { stripVTControlCharacters } from "node:util";
 import { Readability } from "@mozilla/readability";
 import { JSDOM, VirtualConsole } from "jsdom";
@@ -11,6 +15,12 @@ export interface Article {
 }
 
 export const MAX_PAGE_BYTES = 2 * 1024 * 1024;
+export const MAX_PDF_BYTES = 25 * 1024 * 1024;
+
+// Local reads are limited to documents the reader can render, so a path can never expose other files.
+const LOCAL_TYPES: Record<string, "html" | "pdf" | "text"> = {
+  ".html": "html", ".htm": "html", ".xhtml": "html", ".pdf": "pdf", ".txt": "text",
+};
 
 /** Web pages and model output must not be allowed to emit terminal commands. */
 export function cleanText(text: string): string {
@@ -35,6 +45,47 @@ export function normalizeUrl(value: string): string {
   if (url.username || url.password) throw new Error("URLs containing credentials are not supported.");
   url.hash = "";
   return url.href;
+}
+
+/** A readable name for a source: the host of a web page, the file name of a local document. */
+export function sourceLabel(url: string): string {
+  const parsed = new URL(url);
+  return parsed.protocol === "file:" ? basename(fileURLToPath(parsed)) : parsed.hostname;
+}
+
+function looksLikePath(input: string): boolean {
+  return /^(?:[\\/]|~(?:[\\/]|$)|\.{1,2}[\\/]|[a-z]:[\\/])/i.test(input);
+}
+
+async function exists(path: string): Promise<boolean> {
+  return stat(path).then(() => true, () => false);
+}
+
+/**
+ * Canonical key for what the user typed: an http(s) URL, or a file: URL for a local
+ * document given as a path or file:// URL. Different spellings of one file share a key.
+ */
+export async function resolveSource(value: string, cwd = process.cwd()): Promise<string> {
+  const input = value.trim();
+  let path: string | undefined;
+  if (/^file:/i.test(input)) {
+    try { path = fileURLToPath(input); }
+    catch { throw new Error("That file URL is not valid. Use file:///absolute/path."); }
+  } else if (looksLikePath(input)) {
+    path = input.replace(/^~(?=[\\/]|$)/, homedir());
+  } else if (input && !/^[a-z][a-z\d+.-]*:\/\//i.test(input) && await exists(resolve(cwd, input))) {
+    path = input; // A bare relative path such as docs/paper.pdf, only when it exists.
+  }
+  if (path === undefined) return normalizeUrl(input);
+  const absolute = isAbsolute(path) ? path : resolve(cwd, path);
+  let real: string;
+  try { real = await realpath(absolute); }
+  catch { throw new Error(`File not found: ${absolute}`); }
+  if (!(await stat(real)).isFile()) throw new Error(`Not a file: ${absolute}`);
+  if (!LOCAL_TYPES[extname(real).toLowerCase()]) {
+    throw new Error("Unsupported file type. Open an .html, .htm, .xhtml, .pdf, or .txt file.");
+  }
+  return pathToFileURL(real).href;
 }
 
 export function extractArticle(html: string, url: string): Article {
@@ -69,7 +120,7 @@ export function extractArticle(html: string, url: string): Article {
     }
     return {
       url,
-      title: cleanText(parsed?.title || document.title || new URL(url).hostname).replace(/\s+/g, " ").trim(),
+      title: cleanText(parsed?.title || document.title || sourceLabel(url)).replace(/\s+/g, " ").trim(),
       markdown,
       warning: parsed ? undefined : "Reader extraction was unavailable; showing simplified page content.",
     };
@@ -78,10 +129,14 @@ export function extractArticle(html: string, url: string): Article {
   }
 }
 
-async function boundedBody(response: Response): Promise<string> {
-  if (Number(response.headers.get("content-length")) > MAX_PAGE_BYTES) {
+function sizeError(limit: number): Error {
+  return new Error(`This ${limit === MAX_PDF_BYTES ? "PDF" : "page"} exceeds the ${limit / 1024 / 1024} MiB limit.`);
+}
+
+async function boundedBytes(response: Response, limit: number): Promise<Buffer> {
+  if (Number(response.headers.get("content-length")) > limit) {
     await response.body?.cancel();
-    throw new Error("This page exceeds the 2 MiB download limit.");
+    throw sizeError(limit);
   }
   if (!response.body) throw new Error("The server returned an empty page.");
   const reader = response.body.getReader();
@@ -92,17 +147,54 @@ async function boundedBody(response: Response): Promise<string> {
       const { done, value } = await reader.read();
       if (done) break;
       length += value.byteLength;
-      if (length > MAX_PAGE_BYTES) throw new Error("This page exceeds the 2 MiB download limit.");
+      if (length > limit) throw sizeError(limit);
       chunks.push(value);
     }
   } finally {
     await reader.cancel().catch(() => {});
     reader.releaseLock();
   }
+  return Buffer.concat(chunks);
+}
+
+function decodeBody(response: Response, bytes: Buffer): string {
   const charset = response.headers.get("content-type")?.match(/charset=["']?([^;\s"']+)/i)?.[1] ?? "utf-8";
   let decoder: TextDecoder;
   try { decoder = new TextDecoder(charset); } catch { decoder = new TextDecoder(); }
-  return decoder.decode(Buffer.concat(chunks));
+  return decoder.decode(bytes);
+}
+
+function textArticle(text: string, url: string): Article {
+  const markdown = cleanText(text).trim();
+  if (!markdown) throw new Error("The page is empty.");
+  return { url, title: sourceLabel(url), markdown };
+}
+
+async function pdfArticle(bytes: Uint8Array, url: string, signal: AbortSignal): Promise<Article> {
+  // Loaded on demand: pdf.js is large and most sessions never open a PDF.
+  const { extractPdf } = await import("./pdf.ts");
+  return extractPdf(bytes, url, signal);
+}
+
+async function readLocalFile(url: string, signal: AbortSignal): Promise<Article> {
+  const path = fileURLToPath(url);
+  const type = LOCAL_TYPES[extname(path).toLowerCase()];
+  if (!type) throw new Error("Unsupported file type. Open an .html, .htm, .xhtml, .pdf, or .txt file.");
+  const limit = type === "pdf" ? MAX_PDF_BYTES : MAX_PAGE_BYTES;
+  const info = await stat(path);
+  if (!info.isFile()) throw new Error(`Not a file: ${path}`);
+  if (info.size > limit) throw sizeError(limit);
+  const bytes = await readFile(path, { signal });
+  if (bytes.byteLength > limit) throw sizeError(limit);
+  signal.throwIfAborted();
+  if (type === "pdf") return pdfArticle(bytes, url, signal);
+  if (type === "text") return textArticle(bytes.toString("utf8"), url);
+  return extractArticle(bytes.toString("utf8"), url);
+}
+
+/** Loads a key produced by resolveSource: a local document or a web page. */
+export async function loadSource(key: string, signal: AbortSignal): Promise<Article> {
+  return key.startsWith("file:") ? readLocalFile(key, signal) : fetchArticle(key, signal);
 }
 
 export async function fetchArticle(input: string, signal: AbortSignal): Promise<Article> {
@@ -113,7 +205,7 @@ export async function fetchArticle(input: string, signal: AbortSignal): Promise<
     const response = await fetch(url, {
       signal: requestSignal,
       redirect: "manual",
-      headers: { Accept: "text/html, text/plain;q=0.8", "User-Agent": "PiTerminalReader/0.1" },
+      headers: { Accept: "text/html, application/pdf;q=0.9, text/plain;q=0.8", "User-Agent": "PiTerminalReader/0.1" },
     });
     if ([301, 302, 303, 307, 308].includes(response.status)) {
       await response.body?.cancel();
@@ -127,17 +219,21 @@ export async function fetchArticle(input: string, signal: AbortSignal): Promise<
       throw new Error(`Page request failed (HTTP ${response.status}). Login and paywalls are not supported.`);
     }
     const mime = response.headers.get("content-type")?.split(";")[0].trim().toLowerCase();
-    if (mime && !["text/html", "application/xhtml+xml", "text/plain"].includes(mime)) {
+    // Some servers label PDFs as generic binary downloads; those are checked for the PDF signature.
+    const binary = mime === "application/octet-stream" || mime === "binary/octet-stream";
+    if (mime && !binary && !["text/html", "application/xhtml+xml", "text/plain", "application/pdf"].includes(mime)) {
       await response.body?.cancel();
-      throw new Error(`Unsupported page type: ${mime}. Load an HTML article, not a PDF or download.`);
+      throw new Error(`Unsupported page type: ${mime}. Load an HTML article or a PDF.`);
     }
-    const body = await boundedBody(response);
+    const bytes = await boundedBytes(response, mime === "application/pdf" || binary ? MAX_PDF_BYTES : MAX_PAGE_BYTES);
     requestSignal.throwIfAborted();
-    if (mime === "text/plain") {
-      const markdown = cleanText(body).trim();
-      if (!markdown) throw new Error("The page is empty.");
-      return { url, title: new URL(url).hostname, markdown };
+    if (mime === "application/pdf" || bytes.subarray(0, 5).toString("latin1") === "%PDF-") {
+      return pdfArticle(bytes, url, requestSignal);
     }
+    if (binary) throw new Error(`Unsupported page type: ${mime}. Load an HTML article or a PDF.`);
+    if (bytes.byteLength > MAX_PAGE_BYTES) throw sizeError(MAX_PAGE_BYTES);
+    const body = decodeBody(response, bytes);
+    if (mime === "text/plain") return textArticle(body, url);
     return extractArticle(body, url);
   }
   throw new Error("The page redirected too many times.");

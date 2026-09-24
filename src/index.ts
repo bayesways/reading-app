@@ -29,7 +29,7 @@ export default function readerExtension(pi: ExtensionAPI): void {
   pi.on("session_shutdown", reset);
 
   pi.registerCommand("reader", {
-    description: "Read with per-URL Q&A: /reader [URL] or /reader --browser [URL]",
+    description: "Read with per-URL Q&A: /reader [URL|path] or /reader --browser [URL|path]",
     handler: async (args, ctx) => {
       if (ctx.mode !== "tui") {
         ctx.ui.notify("/reader needs pi's interactive terminal UI.", "error");

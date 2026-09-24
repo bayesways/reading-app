@@ -1,5 +1,5 @@
 import type { Article } from "./article.ts";
-import { cleanText, fetchArticle, normalizeUrl } from "./article.ts";
+import { cleanText, loadSource, resolveSource } from "./article.ts";
 
 export interface Exchange { question: string; answer: string; selection?: string }
 export interface Reading {
@@ -14,6 +14,7 @@ export interface Reading {
 }
 export type ReplyKind = "question" | "summary";
 export type Answer = (reading: Reading, question: string, kind: ReplyKind, signal: AbortSignal, selection?: string) => Promise<string>;
+type ResolveInput = (input: string) => Promise<string>;
 
 /** All state is local to this extension instance. Nothing is appended to pi's session. */
 export class ReaderState {
@@ -21,16 +22,24 @@ export class ReaderState {
   private aliases = new Map<string, string>();
   current?: Reading;
   showingSummary = false;
-  status = "Paste a URL above to begin. Article text is sent to your pi model only when you ask or summarize.";
+  status = "Paste a URL or file path above to begin. Article text is sent to your pi model only when you ask or summarize.";
   error = false;
   pendingQuestion = "";
   pendingSelection?: string;
   private operation?: AbortController;
+  // Counts load requests so a slow path lookup can't replace a newer load. Resolving an input
+  // cancels nothing: a mistyped URL or missing file must not abort a running answer.
+  private loadGeneration = 0;
+  private resolving = false;
   onChange: () => void = () => {};
 
-  constructor(private answer: Answer, private loadArticle = fetchArticle) {}
+  constructor(
+    private answer: Answer,
+    private loadArticle = loadSource,
+    private resolveInput: ResolveInput = resolveSource,
+  ) {}
 
-  get busy(): boolean { return !!this.operation; }
+  get busy(): boolean { return !!this.operation || this.resolving; }
 
   private notify(message: string, error = false): void {
     this.status = cleanText(message);
@@ -47,6 +56,8 @@ export class ReaderState {
   }
 
   cancel(): void {
+    this.loadGeneration++;
+    this.resolving = false;
     const operation = this.operation;
     this.operation = undefined;
     operation?.abort();
@@ -64,21 +75,30 @@ export class ReaderState {
   }
 
   async load(input: string): Promise<boolean> {
+    const generation = ++this.loadGeneration;
+    this.resolving = true;
     let key: string;
-    try { key = normalizeUrl(input); }
-    catch (error) { this.notify((error as Error).message, true); return false; }
-    this.cancel();
-    const cached = this.readings.get(this.aliases.get(key) ?? key);
-    if (cached) {
-      this.current = cached;
-      this.showingSummary = false;
-      this.notify("Restored this page's in-memory discussion.");
-      return true;
+    try { key = await this.resolveInput(input); }
+    catch (error) {
+      if (generation !== this.loadGeneration) return false;
+      this.resolving = false;
+      this.notify((error as Error).message, true);
+      return false;
     }
+    if (generation !== this.loadGeneration) return false;
+    this.resolving = false;
+    this.cancel();
     const operation = new AbortController();
     this.operation = operation;
-    this.notify("Loading article… Esc cancels.");
+    this.notify("Loading source… Esc cancels.");
     try {
+      const cached = this.readings.get(this.aliases.get(key) ?? key);
+      if (cached) {
+        this.current = cached;
+        this.showingSummary = false;
+        this.notify("Restored this source's in-memory discussion.");
+        return true;
+      }
       const article = await this.loadArticle(key, operation.signal);
       if (this.operation !== operation) return false;
       const reading = this.readings.get(article.url) ?? {
@@ -88,10 +108,10 @@ export class ReaderState {
       this.aliases.set(key, article.url);
       this.current = reading;
       this.showingSummary = false;
-      this.notify(article.warning ?? "Article ready. Tab to the question box to ask about this page.");
+      this.notify(article.warning ?? "Source ready. Tab to the question box to ask about this source.");
       return true;
     } catch (error) {
-      if (this.operation === operation) this.notify(`Could not load page: ${(error as Error).message}`, true);
+      if (this.operation === operation) this.notify(`Could not load source: ${(error as Error).message}`, true);
       return false;
     } finally {
       if (this.operation === operation) {
@@ -107,7 +127,7 @@ export class ReaderState {
     this.cancel();
     this.current = pages[(pages.indexOf(this.current!) + 1) % pages.length];
     this.showingSummary = false;
-    this.notify("Switched page. Questions and answers are scoped to this URL.");
+    this.notify("Switched source. Questions and answers are scoped to this source.");
   }
 
   async explainSelection(): Promise<boolean> {
