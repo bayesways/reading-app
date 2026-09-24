@@ -25,7 +25,7 @@ input::placeholder,textarea::placeholder{color:var(--faint)}
 .top .field.cursor-active .field-cursor{opacity:1;animation:cursor-blink 1s steps(1,end) infinite}
 .ask-field .field-cursor{background:var(--accent);animation:cursor-pulse 2.8s ease-in-out infinite}
 @keyframes cursor-blink{50%{opacity:0}}
-@keyframes cursor-pulse{0%,100%{opacity:.12}50%{opacity:.42}}
+@keyframes cursor-pulse{0%,100%{opacity:.15}50%{opacity:.46}}
 @media(prefers-reduced-motion:reduce){.top .field.cursor-active .field-cursor{animation:none}.ask-field .field-cursor{animation:none;opacity:.24}}
 h1{font-size:2.1rem;font-weight:600;color:var(--bright);letter-spacing:-.5px;line-height:1.25;margin:0 0 1.1rem}
 .label{font:.78rem/1.7 var(--mono);color:var(--faint);margin:-.6rem 0 1.6rem}.label.recap{color:var(--accent)}
