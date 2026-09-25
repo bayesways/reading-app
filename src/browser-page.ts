@@ -1,3 +1,4 @@
+import { browserHtml } from "./browser-html.ts";
 import { browserMarkdown } from "./browser-markdown.ts";
 
 export function browserPage(nonce: string): string {
@@ -30,6 +31,14 @@ article blockquote{border-left:4px solid var(--accent);margin:0 0 1.5em;padding-
 article table,.ex table{display:block;max-width:100%;overflow:auto;border-collapse:collapse;margin:0 0 1.5em}
 article th,article td,.ex th,.ex td{border:1px solid var(--line);padding:6px 10px;text-align:left}
 article hr{border:0;border-top:1px solid var(--line);margin:2em 0}
+/* reader-view pages keep their figures, as in Firefox's reader view. */
+article img{max-width:100%;height:auto;vertical-align:middle}article img.formula{filter:invert(.88)}
+article figure{margin:0 0 1.5em}article figure img{display:block}
+article figcaption,article caption{margin-top:.5em;font-size:.86rem;line-height:1.55;color:var(--muted);text-align:left}
+article sup,article sub{font-size:.75em;line-height:0}
+article dl{margin:0 0 1.5em}article dt{font-weight:600;color:var(--bright)}article dd{margin:0 0 .6em 1.3em}
+article mark{background:rgba(168,209,168,.22);color:inherit}
+article kbd{font:.85em var(--mono);border:1px solid var(--line);border-radius:4px;padding:1px 5px}
 /* the discussion sits under the article in the same column. no sidebar, no divider. */
 .thread{border-top:1px solid var(--line);margin-top:36px;padding-top:26px}
 .ex{margin-bottom:28px}.ex:last-child{margin-bottom:0}
@@ -68,11 +77,15 @@ article hr{border:0;border-top:1px solid var(--line);margin:2em 0}
 <script nonce="${nonce}">
 'use strict';
 ${browserMarkdown()}
+${browserHtml()}
 const base=location.pathname.endsWith('/')?location.pathname:location.pathname+'/';
 const $=id=>document.getElementById(id); let state; let selected=''; let mode='article'; let requestId=0; let pending=null; let flash=0; let flashTimer=0; let loading=null;
 // This tab's own in-flight request, and the one Escape cancelled. A snapshot can
 // arrive busy because another tab is asking, and that flag never clears on its own.
 let busyId=0; let cancelled=0;
+// What the article pane shows. Rebuilding it reloads its images and drops a live selection,
+// so it is redrawn only when this changes.
+let shownView=null;
 // Browser drafts are local to this tab, keyed by the server's canonical article URL.
 const drafts = new Map();
 let draftUrl = '';
@@ -115,11 +128,14 @@ restoreDraft(current?.article.url || '');
 const shown=loading?.url||(current?current.article.url:'');
 if(shown&&document.activeElement!==$('url'))$('url').value=shown;
 const list=$('pages');list.replaceChildren();for(const page of state.pages){const option=document.createElement('option');option.value=page.url;option.label=page.title;list.append(option)}
-const body=$('article');body.replaceChildren();
+const view=current?JSON.stringify([mode,current.article.url,current.article.title,current.article.warning,mode==='summary'?current.summary:current.article.html||current.article.markdown]):'';
+if(view!==shownView){shownView=view;const body=$('article');body.replaceChildren();
 if(current){const h1=document.createElement('h1');h1.textContent=current.article.title;body.append(h1);
 if(mode==='summary'){body.append(note('recap · type /article to return to the page','recap'));const recap=document.createElement('div');markdown(current.summary||'*No recap yet. Type /recap to make one.*',recap,current.article.url);body.append(recap)}
-else{if(current.article.warning)body.append(note(current.article.warning));const text=document.createElement('div');markdown(withoutTitle(current.article.markdown,current.article.title),text,current.article.url);body.append(text)}}
-else body.append(note('paste a url or file path above to begin. nothing is saved; everything lives in this session.'));
+else{if(current.article.warning)body.append(note(current.article.warning));const text=document.createElement('div');
+// Web pages arrive as reader-view HTML; PDFs and text files only as Markdown.
+if(current.article.html)readerHtml(current.article.html,text,current.article.url);else markdown(withoutTitle(current.article.markdown,current.article.title),text,current.article.url);body.append(text)}}
+else body.append(note('paste a url or file path above to begin. nothing is saved; everything lives in this session.'))}
 const thread=$('thread');thread.replaceChildren();const exchanges=current?current.exchanges:[];
 exchanges.forEach((item,index)=>thread.append(exchange(index+1,item.question,item.selection,item.answer,current?.article.url)));
 if(pending)thread.append(exchange(exchanges.length+1,pending.question,pending.selection,''));
@@ -209,7 +225,7 @@ function holdSelection(){
 function captureSelection(){
   if(holdSelection())api('select',{selection:selected}).catch(fail);
 }
-// The article is rebuilt on every render, so a quote is found again by its text rather than
+// The article is rebuilt whenever it changes, so a quote is found again by its text rather than
 // a held Range. Whitespace is dropped on both sides: a selection's line breaks between
 // paragraphs are not in the text nodes.
 let quoteAt=-1;
