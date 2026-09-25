@@ -45,14 +45,38 @@ function dimension(value) {
   return /^\s*\d{1,5}\s*$/.test(value || '') ? Number(value) : null;
 }
 
+function firstImageUrl(source, names, sourceUrl) {
+  for (const name of names) {
+    const value = imageUrl(source.getAttribute(name), sourceUrl);
+    if (value) return value;
+  }
+  return null;
+}
+
+function firstImageSrcset(source, names, sourceUrl) {
+  for (const name of names) {
+    const value = imageSrcset(source.getAttribute(name), sourceUrl);
+    if (value) return value;
+  }
+  return '';
+}
+
 function htmlImage(source, parent, sourceUrl) {
   const width = dimension(source.getAttribute('width'));
   const height = dimension(source.getAttribute('height'));
-  // A pixel-sized image is a tracker or a spacer, not part of the article.
-  if (width !== null && height !== null && width <= 2 && height <= 2) return;
   const alt = (source.getAttribute('alt') || '').replace(/\s+/g, ' ').trim();
-  const src = imageUrl(source.getAttribute('src'), sourceUrl);
-  const srcset = imageSrcset(source.getAttribute('srcset'), sourceUrl);
+  // Readability repairs many lazy loaders, but it deliberately recognizes only
+  // image-looking filenames. CDNs often use extensionless query URLs, so keep the
+  // common lazy attributes as a browser-side fallback.
+  const lazySrc = firstImageUrl(source,
+    ['data-src', 'data-lazy-src', 'data-original', 'data-cfsrc', 'data-flickity-lazyload'], sourceUrl);
+  const lazySrcset = firstImageSrcset(source, ['data-srcset', 'data-lazy-srcset'], sourceUrl);
+  const src = lazySrc || imageUrl(source.getAttribute('src'), sourceUrl);
+  const srcset = lazySrcset || imageSrcset(source.getAttribute('srcset'), sourceUrl);
+  // A pixel-sized image is a tracker or spacer. Tiny declared dimensions on a
+  // lazy placeholder do not describe the replacement image.
+  const tiny = width !== null && height !== null && width <= 2 && height <= 2;
+  if (tiny && !lazySrc && !lazySrcset) return;
   if (!src && !srcset) {
     // Local files, and anything else the page cannot load, keep their description.
     parent.append(document.createTextNode(alt ? '[Image: ' + alt + ']' : '[Image]'));
@@ -70,8 +94,8 @@ function htmlImage(source, parent, sourceUrl) {
   const title = source.getAttribute('title');
   if (title) img.setAttribute('title', title);
   // Declared dimensions reserve the space, so the text does not jump as images arrive.
-  if (width) img.setAttribute('width', String(width));
-  if (height) img.setAttribute('height', String(height));
+  if (width && !tiny) img.setAttribute('width', String(width));
+  if (height && !tiny) img.setAttribute('height', String(height));
   // Formula images (Wikipedia's math, for one) are black glyphs on nothing: invisible on a dark page.
   if (/\\[a-z]{2,}/i.test(alt)) img.className = 'formula';
   parent.append(img);

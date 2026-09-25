@@ -656,6 +656,21 @@ test("a reader-view article is redrawn only when it changes, so its images are n
   assert.equal(ui.$("article").querySelector("img")?.getAttribute("alt"), "Chart");
 });
 
+test("reader-view HTML recovers extensionless lazy-loaded images and source sets", async (t) => {
+  const snapshot = fixture();
+  snapshot.current!.article.html = `<p>Lazy figures follow.</p>
+<img class="lazy" src="data:image/gif;base64,R0lGODlhAQABAAAAACw=" data-src="/image?id=123&amp;format=webp" alt="Lazy URL" width="1" height="1">
+<img data-srcset="/image?id=small 320w, /image?id=large 960w" alt="Lazy set">`;
+  const ui = await client(t, snapshot);
+  const [url, set] = [...ui.$("article").querySelectorAll("img")];
+  assert.equal(url.getAttribute("src"), "https://example.com/image?id=123&format=webp");
+  assert.deepEqual([url.getAttribute("width"), url.getAttribute("height")], [null, null]);
+  assert.equal(set.getAttribute("src"), null);
+  assert.equal(set.getAttribute("srcset"),
+    "https://example.com/image?id=small 320w, https://example.com/image?id=large 960w");
+  assert.match(set.getAttribute("sizes")!, /680px/);
+});
+
 test("browser page restores an attached passage, explains it with Enter and clears it with Escape", async (t) => {
   const snapshot = fixture();
   snapshot.current!.selection = "worse moves";
