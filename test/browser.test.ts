@@ -2,6 +2,9 @@ import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
 import vm from "node:vm";
 import { JSDOM, VirtualConsole } from "jsdom";
+import { extractArticle } from "../src/article.ts";
+import { browserHtml } from "../src/browser-html.ts";
+import { browserMarkdown } from "../src/browser-markdown.ts";
 import { BrowserReader, parseReaderCommand, type BrowserSnapshot } from "../src/browser.ts";
 import { browserPage } from "../src/browser-page.ts";
 import { ReaderState } from "../src/reader.ts";
@@ -32,6 +35,13 @@ test("browser client is self-contained, syntactically valid and avoids HTML inje
   assert.doesNotMatch(source, /<\/script|<!--/i);
   assert.doesNotMatch(page, /sourceMappingURL/);
   assert.doesNotMatch(page, /<script[^>]+src=|<link[^>]+href=|<img/i);
+  assert.equal(source.match(/function safeUrl\b/g)?.length, 1); // Markdown and reader HTML share one URL policy.
+  // Each renderer can also be embedded independently without relying on a global
+  // that only browserClient happens to provide.
+  assert.equal(browserHtml().match(/function safeUrl\b/g)?.length, 1);
+  assert.equal(browserMarkdown().match(/function safeUrl\b/g)?.length, 1);
+  new vm.Script(browserHtml());
+  new vm.Script(browserMarkdown());
 });
 
 test("browser reader is loopback-only, capability protected and CSP restricted", async (t) => {
@@ -66,8 +76,13 @@ test("browser reader is loopback-only, capability protected and CSP restricted",
   const stateResponse = await fetch(`${result.url}api/state`);
   const initial = await stateResponse.json() as BrowserSnapshot;
   assert.equal(initial.model, "provider/model");
+  assert.equal(initial.status, "Source ready.");
+  assert.equal("showingSummary" in initial, false);
   assert.equal(initial.current?.article.title, "Browser Reader <script>alert(1)</script>");
-  assert.match(initial.current!.article.html!, /onerror/); // Sent as data; the page sanitizes it.
+  assert.equal(initial.current!.article.content.format, "html");
+  assert.match(initial.current!.article.content.text, /onerror/); // Sent as data; the page sanitizes it.
+  assert.equal("html" in initial.current!.article, false);
+  assert.equal("markdown" in initial.current!.article, false);
   assert.equal(initial.pages.length, 1);
 
   const wrong = result.url.replace(/\/[^/]+\/$/, "/wrong-token/");
@@ -198,10 +213,13 @@ test("reader command parser makes browser mode explicit", () => {
 
 function fixture(): BrowserSnapshot {
   return {
-    model: "provider/model", status: "Source ready. Type below to ask about this source.", error: false, busy: false,
-    showingSummary: false, pages: [{ url: "https://example.com/a", title: "Annealing" }],
+    model: "provider/model", status: "Source ready.", error: false, busy: false,
+    pages: [{ url: "https://example.com/a", title: "Annealing" }],
     current: {
-      article: { url: "https://example.com/a", title: "Annealing", markdown: "# Annealing\n\nBody text." },
+      article: {
+        url: "https://example.com/a", title: "Annealing",
+        content: { format: "markdown", text: "# Annealing\n\nBody text." },
+      },
       exchanges: [{ question: "Why?", answer: "Because.", selection: "worse moves" }],
       summary: "",
     },
@@ -211,7 +229,7 @@ function fixture(): BrowserSnapshot {
 function emptyFixture(): BrowserSnapshot {
   return {
     model: "provider/model", status: "Paste a URL or file path to begin.", error: false, busy: false,
-    showingSummary: false, pages: [],
+    pages: [],
   };
 }
 
@@ -408,7 +426,10 @@ test("browser restores per-article drafts after canonical URL switches and faile
   const ui = await client(t);
   const a = fixture();
   const b = fixture();
-  b.current!.article = { url: "https://example.com/canonical-b", title: "B", markdown: "Second article." };
+  b.current!.article = {
+    url: "https://example.com/canonical-b", title: "B",
+    content: { format: "markdown", text: "Second article." },
+  };
   const load = async (url: string, response: BrowserSnapshot) => {
     const complete = ui.deferNext();
     ui.type("url", url);
@@ -506,6 +527,17 @@ test("a question typed while the first snapshot is in flight belongs to the arti
   assert.equal((ui.$("question") as HTMLTextAreaElement).value, "");
 });
 
+test("a question submitted before the first snapshot is sent without crashing", async (t) => {
+  const ui = await client(t, fixture(), true);
+  ui.type("question", "Asked while connecting");
+  await ui.submit("askForm");
+  assert.deepEqual(ui.calls.at(-1), {
+    action: "ask", body: { question: "Asked while connecting", selection: "" },
+  });
+  ui.releaseFirst();
+  await ui.settle();
+});
+
 test("a snapshot that is already busy elsewhere still accepts a question", async (t) => {
   // Nothing re-polls state, so a busy flag from another tab or the TUI would
   // otherwise disable this composer for the life of the page.
@@ -527,6 +559,17 @@ test("an unknown command reports itself even while a question is in flight", asy
   assert.equal(ui.calls.filter(({ action }) => action === "ask").length, 1);
 });
 
+test("IME confirmation does not submit a half-composed question", async (t) => {
+  const ui = await client(t);
+  ui.type("question", "未確定");
+  ui.$("question").dispatchEvent(new ui.window.KeyboardEvent("keydown", {
+    key: "Enter", isComposing: true, bubbles: true, cancelable: true,
+  }));
+  await ui.settle();
+  assert.equal(ui.calls.some(({ action }) => action === "ask"), false);
+  assert.equal((ui.$("question") as HTMLTextAreaElement).value, "未確定");
+});
+
 test("repeated submissions while busy do not replace the request or consume the next draft", async (t) => {
   const ui = await client(t);
   ui.type("question", "First question");
@@ -543,7 +586,7 @@ test("repeated submissions while busy do not replace the request or consume the 
 
 test("browser renders nested Markdown, entities, links, lists, tables and heading levels", async (t) => {
   const snapshot = fixture();
-  snapshot.current!.article.markdown = String.raw`# Annealing
+  snapshot.current!.article.content = { format: "markdown", text: String.raw`# Annealing
 
 ## Details
 
@@ -564,7 +607,7 @@ _Emphasis_ and **[a _nested_ link](https://example.com/path_(one)?a=1&b=2)** &am
 [Reference][ref] and [relative](/docs).
 
 [ref]: https://example.com/reference "A title"
-`;
+` };
   const ui = await client(t, snapshot);
   const article = ui.$("article");
   assert.deepEqual([...article.querySelectorAll("h1,h2,h3")].map((h) => [h.tagName, h.textContent]),
@@ -606,7 +649,7 @@ test("the same Markdown renderer formats answers and recaps without interpreting
 
 test("Markdown cannot create active HTML, remote images, or unsafe links", async (t) => {
   const snapshot = fixture();
-  snapshot.current!.article.markdown = String.raw`<script>window.pwned = true</script>
+  snapshot.current!.article.content = { format: "markdown", text: String.raw`<script>window.pwned = true</script>
 
 <img src="https://example.com/tracker" onerror="window.pwned = true">
 
@@ -620,7 +663,7 @@ test("Markdown cannot create active HTML, remote images, or unsafe links", async
 
 &lt;img src=x onerror=alert(1)&gt;
 
-[safe](https://example.com/?x=%22onclick%3Dalert%281%29 "An innocent title")`;
+[safe](https://example.com/?x=%22onclick%3Dalert%281%29 "An innocent title")` };
   const ui = await client(t, snapshot);
   const article = ui.$("article");
   assert.equal(article.querySelector("script,img,iframe,object,embed,svg,style,input"), null);
@@ -635,7 +678,10 @@ test("Markdown cannot create active HTML, remote images, or unsafe links", async
 
 test("Markdown links with no target in the page stay plain text", async (t) => {
   const snapshot = fixture();
-  snapshot.current!.article.markdown = "# Annealing\n\nA [footnote](#fn1), a [backref](#fnref1) and an [empty]() link.\n\n![](https://example.com/x.png)\n";
+  snapshot.current!.article.content = {
+    format: "markdown",
+    text: "# Annealing\n\nA [footnote](#fn1), a [backref](#fnref1) and an [empty]() link.\n\n![](https://example.com/x.png)\n",
+  };
   const ui = await client(t, snapshot);
   const article = ui.$("article");
   assert.equal(article.querySelectorAll("a").length, 0); // Neither resolves against the source URL.
@@ -643,9 +689,23 @@ test("Markdown links with no target in the page stay plain text", async (t) => {
   assert.match(article.textContent!, /\[Image\]/); // An undescribed image is still marked, not a blank gap.
 });
 
+test("extracted fragments and named anchors stay plain text in the browser", async (t) => {
+  const prose = "Simulated annealing sometimes accepts worse moves while cooling, which helps it escape local optima. ";
+  const extracted = extractArticle(`<html><head><title>Annealing</title></head><body><article>
+<h1>Annealing</h1><p>${prose.repeat(4)}</p>
+<p><a href=" #cite_note-1 ">[1]</a> <a name="notes">Notes</a> <a href="/more">More</a></p>
+</article></body></html>`, "https://example.com/wiki/Annealing");
+  const snapshot = fixture();
+  snapshot.current!.article.content = { format: "html", text: extracted.html! };
+  const ui = await client(t, snapshot);
+  const rendered = ui.$("article");
+  assert.match(rendered.textContent!, /\[1\]\s+Notes\s+More/);
+  assert.deepEqual([...rendered.querySelectorAll("a")].map((link) => link.href), ["https://example.com/more"]);
+});
+
 test("reader-view HTML keeps figures, images and tables but nothing active", async (t) => {
   const snapshot = fixture();
-  snapshot.current!.article.html = String.raw`<div id="readability-page-1" class="page">
+  snapshot.current!.article.content = { format: "html", text: String.raw`<div id="readability-page-1" class="page">
 <h1>Cooling</h1>
 <p id="question" class="lead" style="color:red" onclick="window.pwned = true">Worse moves<sup>1</sup> are <a href="javascript:alert(1)">early</a>,
 <a href="/wiki/Temperature" title="Temperature" id="thread">temperature</a> and <a href="#cite_note-1">[1]</a>.</p>
@@ -663,7 +723,7 @@ test("reader-view HTML keeps figures, images and tables but nothing active", asy
     return 1</code></pre>
 <custom-element>Unwrapped text</custom-element><section><p>Sectioned</p></section>
 <template><p>Hidden template</p></template><noscript><p>Hidden noscript</p></noscript>
-</div>`;
+</div>` };
   const ui = await client(t, snapshot);
   const article = ui.$("article");
   assert.equal(article.querySelector("script,style,iframe,svg,form,input,button,template,noscript,math,picture,source"), null);
@@ -714,7 +774,9 @@ test("reader-view HTML keeps figures, images and tables but nothing active", asy
 
 test("a reader-view article is redrawn only when it changes, so its images are not reloaded", async (t) => {
   const snapshot = fixture();
-  snapshot.current!.article.html = '<p>Body text.</p><img src="https://example.com/chart.png" alt="Chart">';
+  snapshot.current!.article.content = {
+    format: "html", text: '<p>Body text.</p><img src="https://example.com/chart.png" alt="Chart">',
+  };
   const ui = await client(t, snapshot);
   const first = ui.$("article").querySelector("img");
   assert.ok(first);
@@ -732,9 +794,9 @@ test("a reader-view article is redrawn only when it changes, so its images are n
 
 test("reader-view HTML recovers extensionless lazy-loaded images and source sets", async (t) => {
   const snapshot = fixture();
-  snapshot.current!.article.html = `<p>Lazy figures follow.</p>
+  snapshot.current!.article.content = { format: "html", text: `<p>Lazy figures follow.</p>
 <img class="lazy" src="data:image/gif;base64,R0lGODlhAQABAAAAACw=" data-src="/image?id=123&amp;format=webp" alt="Lazy URL" width="1" height="1">
-<img data-srcset="/image?id=small 320w, /image?id=large 960w" alt="Lazy set">`;
+<img data-srcset="/image?id=small 320w, /image?id=large 960w" alt="Lazy set">` };
   const ui = await client(t, snapshot);
   const [url, set] = [...ui.$("article").querySelectorAll("img")];
   assert.equal(url.getAttribute("src"), "https://example.com/image?id=123&format=webp");
@@ -818,7 +880,7 @@ test("clearing a quote with Escape scrolls back to the passage it came from", as
   // The words repeat; the scroll goes to the occurrence that was selected, though the
   // article was rebuilt in between and the quote's line break is not in the page text.
   let snapshot = fixture();
-  snapshot.current!.article.markdown = markdown;
+  snapshot.current!.article.content = { format: "markdown", text: markdown };
   let { ui, scrolls, third } = await layout(snapshot, [900, 1900, 2900]);
   await select(ui, 2);
   assert.match(ui.$("quotedText").textContent!, /worse moves are rare/);
@@ -834,7 +896,7 @@ test("clearing a quote with Escape scrolls back to the passage it came from", as
 
   // A quote attached in another tab has no selected position, so its first match is used.
   snapshot = fixture();
-  snapshot.current!.article.markdown = markdown;
+  snapshot.current!.article.content = { format: "markdown", text: markdown };
   snapshot.current!.selection = "worse moves";
   ({ ui, scrolls } = await layout(snapshot, [900, 1900, 2900]));
   await ui.press("Escape");
@@ -992,4 +1054,18 @@ test("text in a previous answer can be selected, explained and asked about like 
   ui.type("question", "Why does that follow?");
   await ui.submit("askForm");
   assert.deepEqual(ui.calls.at(-1), { action: "ask", body: { question: "Why does that follow?", selection: "Because." } });
+});
+
+test("a status-only render preserves a live selection in an answer", async (t) => {
+  const ui = await client(t);
+  const selection = ui.window.getSelection()!;
+  const range = ui.window.document.createRange();
+  range.selectNodeContents(ui.window.document.querySelector("#thread .a p")!);
+  selection.addRange(range);
+  assert.equal(selection.toString(), "Because.");
+
+  // Switching to the already-visible article still calls render, like the status timer does.
+  ui.type("question", "/article");
+  await ui.submit("askForm");
+  assert.equal(selection.toString(), "Because.");
 });

@@ -108,7 +108,7 @@ export class ReaderState {
       this.aliases.set(key, article.url);
       this.current = reading;
       this.showingSummary = false;
-      this.notify(article.warning ?? "Source ready. Tab to the question box to ask about this source.");
+      this.notify(article.warning ?? "Source ready.");
       return true;
     } catch (error) {
       if (this.operation === operation) this.notify(`Could not load source: ${(error as Error).message}`, true);
@@ -132,7 +132,7 @@ export class ReaderState {
 
   async explainSelection(): Promise<boolean> {
     if (!this.current?.selection) {
-      this.notify("Select a passage first: click/drag in fullscreen, or press v in the article.", true);
+      this.notify("Select a passage first.", true);
       return false;
     }
     return this.ask("Explain the selected passage in the context of this article and our discussion. If it is a word or term, define it simply and give a short example.");
@@ -160,12 +160,12 @@ export class ReaderState {
         reading.summary = text;
         reading.summaryScroll = 0;
         this.showingSummary = true;
-        this.notify("Learning summary ready. F3 switches back to the article. Nothing was saved.");
+        this.notify("Learning summary ready. Nothing was saved.");
       } else {
         reading.exchanges.push({ question, answer: text, ...(selection ? { selection } : {}) });
         // Preserve a new draft entered while the previous question was being answered.
         if (reading.draft.trim() === question) reading.draft = "";
-        this.notify("Answer ready. F2 summarizes your learnings so far.");
+        this.notify("Answer ready.");
       }
       reading.chatScroll = Number.MAX_SAFE_INTEGER;
       return true;

@@ -15,10 +15,14 @@ export interface BrowserSnapshot {
   status: string;
   error: boolean;
   busy: boolean;
-  showingSummary: boolean;
   pages: Array<{ url: string; title: string }>;
   current?: {
-    article: { url: string; title: string; markdown: string; html?: string; warning?: string };
+    article: {
+      url: string;
+      title: string;
+      content: { format: "html" | "markdown"; text: string };
+      warning?: string;
+    };
     exchanges: Array<{ question: string; answer: string; selection?: string }>;
     summary: string;
     selection?: string;
@@ -28,25 +32,18 @@ export interface BrowserSnapshot {
 export interface BrowserOpenResult { url: string; launched: boolean; error?: string }
 export interface BrowserReaderOptions { launch?: (url: string) => Promise<void> | void }
 
-function browserStatus(status: string): string {
-  return status
-    .replace("Tab to the question box to ask about this source.", "Type below to ask about this source.")
-    .replace("F3 switches back to the article.", "Type /article to return to the page.")
-    .replace("F2 summarizes your learnings so far.", "Type /recap to summarize your learnings.")
-    .replace("click/drag in fullscreen, or press v in the article.", "select text in the article first.");
-}
-
 function snapshot(state: ReaderState, model: string): BrowserSnapshot {
   const current = state.current;
   return {
-    model: cleanText(model), status: browserStatus(state.status), error: state.error, busy: state.busy,
-    showingSummary: state.showingSummary,
+    model: cleanText(model), status: state.status, error: state.error, busy: state.busy,
     pages: [...state.readings.values()].map(({ article }) => ({ url: article.url, title: article.title })),
     ...(current ? { current: {
       // Copied field by field on purpose: the reading model is internal, this payload is the page's API.
       article: {
-        url: current.article.url, title: current.article.title, markdown: current.article.markdown,
-        ...(current.article.html ? { html: current.article.html } : {}),
+        url: current.article.url, title: current.article.title,
+        content: current.article.html
+          ? { format: "html", text: current.article.html }
+          : { format: "markdown", text: current.article.markdown },
         ...(current.article.warning ? { warning: current.article.warning } : {}),
       },
       exchanges: current.exchanges.map(({ question, answer, selection }) => ({

@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
+import { browserUrl } from "./browser-url.ts";
 
 // Embed the installed browser build so the reader remains self-contained and
 // works under its nonce-only CSP without fetching scripts from a CDN. Reading it
@@ -24,16 +25,6 @@ const markdownParser = window.markdownit({ html: false, linkify: false, typograp
 const markdownTags = new Set(['p','blockquote','ul','ol','li','h1','h2','h3','h4','h5','h6',
   'strong','em','s','a','table','thead','tbody','tr','th','td']);
 
-function markdownUrl(value, sourceUrl) {
-  // A bare fragment has no target in the rendered page, and resolving it against
-  // the source would send every footnote marker back out to the original site.
-  if (!value || value.startsWith('#')) return null;
-  try {
-    const url = new URL(value, sourceUrl);
-    return ['http:', 'https:'].includes(url.protocol) && !url.username && !url.password ? url.href : null;
-  } catch { return null; }
-}
-
 // Consume parser tokens through DOM APIs only. Raw HTML is plain text, images
 // keep their descriptions, and only explicitly allowed tags/attributes exist.
 function markdownTokens(tokens, root, sourceUrl) {
@@ -49,7 +40,7 @@ function markdownTokens(tokens, root, sourceUrl) {
       if (token.hidden || !markdownTags.has(token.tag)) continue;
       // The page already owns h1. Preserve h2-h6 rather than shifting all headings.
       let tag = token.tag === 'h1' ? 'h2' : token.tag;
-      const href = tag === 'a' ? markdownUrl(token.attrGet('href'), sourceUrl) : null;
+      const href = tag === 'a' ? safeUrl(token.attrGet('href'), sourceUrl) : null;
       if (tag === 'a' && !href) tag = 'span';
       const node = document.createElement(tag);
       if (href) {
@@ -103,6 +94,11 @@ function markdown(text, root, sourceUrl) {
 }
 `;
 
-export function browserMarkdown(): string {
+export function browserMarkdownRenderer(): string {
   return parserBundle() + renderer;
+}
+
+/** A standalone Markdown renderer, including the URL policy it depends on. */
+export function browserMarkdown(): string {
+  return browserUrl() + browserMarkdownRenderer();
 }

@@ -103,9 +103,15 @@ def main():
                 browser_url = match.group().decode()
                 with urllib.request.urlopen(browser_url + "api/state", timeout=5) as response:
                     state = json.load(response)
-                assert state["model"] == "openai/gpt-4o · thinking:off"
+                with (ROOT / "reader.config.json").open() as config_file:
+                    reader_config = json.load(config_file)
+                expected_model = reader_config.get("defaultModel") or "openai/gpt-4o"
+                expected_thinking = reader_config.get("defaultThinkingLevel") or "off"
+                assert state["model"] == f"{expected_model} · thinking:{expected_thinking}", state["model"]
                 assert state["current"]["article"]["title"] == "Reader smoke fixture"
-                assert "Bayesian inference" in state["current"]["article"]["markdown"]
+                content = state["current"]["article"]["content"]
+                assert content["format"] == "html"
+                assert "Bayesian inference" in content["text"]
                 start = len(transcript)
                 os.write(master, b"/reader --browser-stop\r")
                 wait_for("Browser reader stopped", start)
