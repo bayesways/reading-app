@@ -53,6 +53,25 @@ test("extracts Markdown, resolves links, strips scripts and keeps image descript
   assert.match(article.markdown, /Posterior plot/);
   assert.doesNotMatch(article.markdown, /javascript:|readerExecuted|tracker/);
   assert.equal((globalThis as Record<string, unknown>).readerExecuted, undefined);
+  // The browser gets the reader view itself; only it may show the image.
+  assert.match(article.html!, /<h2>Evidence<\/h2>/);
+  assert.match(article.html!, /<img src="https:\/\/example.com\/tracker" alt="Posterior plot">/);
+  assert.doesNotMatch(article.html!, /<script|javascript:|readerExecuted/);
+});
+
+test("images hidden from scripts are recovered for the browser but described to the model", () => {
+  const lazy = `<html><head><title>Lazy figures</title></head><body><article><p>${paragraph}</p>
+<figure><img src="data:image/gif;base64,R0lGODlhAQABAAAAACw=" data-src="/figures/prior.png" alt="Prior density"><figcaption>The prior.</figcaption></figure>
+<p>${paragraph}</p>
+<figure><img class="lazyload" src="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%3E%3C/svg%3E" alt=""><noscript><img src="/figures/posterior.png" alt="Posterior density"></noscript><figcaption>The posterior.</figcaption></figure>
+<p>${paragraph}</p></article></body></html>`;
+  const article = extractArticle(lazy, "https://example.com/post");
+  assert.match(article.html!, /src="https:\/\/example.com\/figures\/prior.png"/);
+  assert.match(article.html!, /src="https:\/\/example.com\/figures\/posterior.png"/);
+  assert.doesNotMatch(article.html!, /noscript/);
+  assert.match(article.markdown, /\\\[Image: Prior density\\\]\s+The prior\./);
+  assert.match(article.markdown, /\\\[Image: Posterior density\\\]\s+The posterior\./);
+  assert.doesNotMatch(article.markdown, /figures|data:/);
 });
 
 test("terminal commands and bidi overrides never reach rendered text", () => {

@@ -110,6 +110,7 @@ Start pi with `pi --tui-mode fullscreen` for mouse selection in the terminal.
 - The reader sends the extracted article, selected passage, and prior Q&A for that URL to the selected model provider.
 - Content is held in memory only and is cleared when the pi session ends, reloads, or the browser reader is stopped.
 - Reader extraction supports ordinary HTTP(S) pages, PDFs with a text layer, and local HTML/PDF/text files. JavaScript-only pages, scanned PDFs, paywalls, and login-required pages may not work.
+- Web pages are extracted with Mozilla's Readability, the engine behind Firefox's Reader View. The browser shows that reader view with its figures, images, tables and formulas. Images load directly from the sites that host them, without a referrer. The terminal and the model see only the images' descriptions. Images in local HTML files are shown as their descriptions.
 - The reader only opens local files you name, and only the document types listed above.
 
 ## Development

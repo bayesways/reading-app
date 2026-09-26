@@ -10,6 +10,7 @@ const article = async (url: string) => ({
   url,
   title: "Browser Reader <script>alert(1)</script>",
   markdown: "# Safe article\n\nSelect a **Bayesian posterior** here.\n\n<script>globalThis.pwned = true</script>",
+  html: "<p>Select a <b>Bayesian posterior</b> here.</p><img src=x onerror=globalThis.pwned=true>",
 });
 
 async function post(base: string, action: string, body: unknown, origin = new URL(base).origin): Promise<Response> {
@@ -54,16 +55,19 @@ test("browser reader is loopback-only, capability protected and CSP restricted",
   assert.match(csp, /default-src 'none'/);
   assert.match(csp, /connect-src 'self'/);
   assert.match(csp, /frame-ancestors 'none'/);
+  // Reader-view images load from the web; nothing else the article names can.
+  assert.match(csp, /img-src https: http: data:;/);
   assert.equal(pageResponse.headers.get("referrer-policy"), "no-referrer");
   const nonce = page.match(/<script nonce="([^"]+)">/)?.[1];
   assert.ok(nonce);
   assert.match(csp, new RegExp(`script-src 'nonce-${nonce}'`));
-  assert.doesNotMatch(page, /Safe article|globalThis\.pwned|Browser Reader <script>/); // Data arrives only through JSON.
+  assert.doesNotMatch(page, /Safe article|Bayesian posterior|globalThis\.pwned|Browser Reader <script>/); // Data arrives only through JSON.
 
   const stateResponse = await fetch(`${result.url}api/state`);
   const initial = await stateResponse.json() as BrowserSnapshot;
   assert.equal(initial.model, "provider/model");
   assert.equal(initial.current?.article.title, "Browser Reader <script>alert(1)</script>");
+  assert.match(initial.current!.article.html!, /onerror/); // Sent as data; the page sanitizes it.
   assert.equal(initial.pages.length, 1);
 
   const wrong = result.url.replace(/\/[^/]+\/$/, "/wrong-token/");
@@ -637,6 +641,108 @@ test("Markdown links with no target in the page stay plain text", async (t) => {
   assert.equal(article.querySelectorAll("a").length, 0); // Neither resolves against the source URL.
   assert.match(article.textContent!, /A footnote, a backref and an empty link/);
   assert.match(article.textContent!, /\[Image\]/); // An undescribed image is still marked, not a blank gap.
+});
+
+test("reader-view HTML keeps figures, images and tables but nothing active", async (t) => {
+  const snapshot = fixture();
+  snapshot.current!.article.html = String.raw`<div id="readability-page-1" class="page">
+<h1>Cooling</h1>
+<p id="question" class="lead" style="color:red" onclick="window.pwned = true">Worse moves<sup>1</sup> are <a href="javascript:alert(1)">early</a>,
+<a href="/wiki/Temperature" title="Temperature" id="thread">temperature</a> and <a href="#cite_note-1">[1]</a>.</p>
+<figure><a href="https://example.com/file"><img src="/chart.png" srcset="/chart-2x.png 2x, javascript:alert(1) 3x" alt="Energy chart" width="500" height="161" onerror="window.pwned = true" style="display:none" class="thumb"></a><figcaption>Energy over time</figcaption></figure>
+<p><picture><source srcset="https://example.com/a.avif" type="image/avif"><img src="https://example.com/a.png" srcset="https://cdn.example.com/w_300,h_200/a.png 300w, https://cdn.example.com/w_600,h_400/a.png 600w" alt="Responsive"></picture></p>
+<p>Formula <img src="https://wikimedia.org/api/rest_v1/media/math/render/svg/abc" alt="{\displaystyle e_{\mathrm {new} }}"> inline.</p>
+<img src="https://tracker.example.com/pixel.gif" width="1" height="1">
+<img src="file:///Users/reader/secret.png" alt="Local figure"><img src="data:text/html,<script>window.pwned = true</script>" alt="Bad data">
+<img src="data:image/png;base64,iVBORw0KGgo=" alt="Inline data">
+<script>window.pwned = true</script><style>body{display:none}</style><iframe src="https://example.com"></iframe>
+<svg><script>window.pwned = true</script></svg><form action="https://evil.example"><input name="q"><button>Go</button></form>
+<p><math><semantics><mi>x</mi><annotation encoding="application/x-tex">\TeXsource</annotation></semantics></math></p>
+<table><tr><th colspan="2" rowspan="x">Head</th></tr><tr><td>A</td><td>B</td></tr></table>
+<pre><code><span class="k">def</span> f():
+    return 1</code></pre>
+<custom-element>Unwrapped text</custom-element><section><p>Sectioned</p></section>
+<template><p>Hidden template</p></template><noscript><p>Hidden noscript</p></noscript>
+</div>`;
+  const ui = await client(t, snapshot);
+  const article = ui.$("article");
+  assert.equal(article.querySelector("script,style,iframe,svg,form,input,button,template,noscript,math,picture,source"), null);
+  assert.equal((ui.window as unknown as { pwned?: boolean }).pwned, undefined);
+  for (const node of article.querySelectorAll("*")) {
+    for (const { name } of node.attributes) {
+      assert.ok(!["id", "style"].includes(name) && !name.startsWith("on"), `${node.tagName} kept ${name}`);
+    }
+  }
+  // The article cannot shadow the page's own elements.
+  assert.equal(ui.$("question").tagName, "TEXTAREA");
+  assert.equal(ui.$("thread").tagName, "SECTION");
+  assert.deepEqual([...article.querySelectorAll("h1,h2")].map((h) => [h.tagName, h.textContent]),
+    [["H1", "Annealing"], ["H2", "Cooling"]]);
+
+  const images = [...article.querySelectorAll("img")];
+  assert.deepEqual(images.map((img) => img.getAttribute("alt")),
+    ["Energy chart", "Responsive", "{\\displaystyle e_{\\mathrm {new} }}", "Inline data"]);
+  const [chart, responsive, formula, inline] = images;
+  assert.equal(chart.getAttribute("src"), "https://example.com/chart.png");
+  assert.equal(chart.getAttribute("srcset"), null); // One unsafe candidate drops the set, not the image.
+  assert.deepEqual([chart.getAttribute("width"), chart.getAttribute("height")], ["500", "161"]);
+  assert.deepEqual([chart.getAttribute("loading"), chart.getAttribute("referrerpolicy")], ["lazy", "no-referrer"]);
+  assert.equal(chart.className, "");
+  assert.equal(chart.closest("a")?.getAttribute("href"), "https://example.com/file");
+  assert.equal(article.querySelector("figure figcaption")?.textContent, "Energy over time");
+  assert.equal(responsive.getAttribute("srcset"),
+    "https://cdn.example.com/w_300,h_200/a.png 300w, https://cdn.example.com/w_600,h_400/a.png 600w");
+  assert.match(responsive.getAttribute("sizes")!, /680px/);
+  assert.equal(chart.getAttribute("sizes"), null);
+  assert.equal(formula.className, "formula");
+  assert.equal(inline.getAttribute("src"), "data:image/png;base64,iVBORw0KGgo=");
+  assert.match(article.textContent!, /\[Image: Local figure\]\s*\[Image: Bad data\]/);
+
+  const links = [...article.querySelectorAll("a")];
+  assert.deepEqual(links.map((a) => a.getAttribute("href")), ["https://example.com/wiki/Temperature", "https://example.com/file"]);
+  assert.deepEqual([links[0].target, links[0].rel, links[0].title], ["_blank", "noopener noreferrer", "Temperature"]);
+  assert.match(article.textContent!, /Worse moves1 are early,\s+temperature and \[1\]\./);
+  assert.equal(article.querySelector("sup")?.textContent, "1");
+  const head = article.querySelector("th")!;
+  assert.deepEqual([head.getAttribute("colspan"), head.getAttribute("rowspan")], ["2", null]);
+  assert.equal(article.querySelector("pre > code")?.textContent, "def f():\n    return 1");
+  assert.equal(article.querySelector("pre span"), null);
+  assert.equal(article.querySelector("div > p:only-child")?.textContent, "Sectioned");
+  assert.match(article.textContent!, /Unwrapped text/);
+  assert.doesNotMatch(article.textContent!, /Hidden|TeXsource|Go\b/);
+});
+
+test("a reader-view article is redrawn only when it changes, so its images are not reloaded", async (t) => {
+  const snapshot = fixture();
+  snapshot.current!.article.html = '<p>Body text.</p><img src="https://example.com/chart.png" alt="Chart">';
+  const ui = await client(t, snapshot);
+  const first = ui.$("article").querySelector("img");
+  assert.ok(first);
+  ui.type("question", "What does the chart show?");
+  await ui.submit("askForm");
+  assert.equal(ui.calls.at(-1)?.action, "ask");
+  assert.equal(ui.$("article").querySelector("img"), first);
+  ui.type("question", "/recap");
+  await ui.submit("askForm");
+  assert.equal(ui.$("article").querySelector("img"), null);
+  ui.type("question", "/article");
+  await ui.submit("askForm");
+  assert.equal(ui.$("article").querySelector("img")?.getAttribute("alt"), "Chart");
+});
+
+test("reader-view HTML recovers extensionless lazy-loaded images and source sets", async (t) => {
+  const snapshot = fixture();
+  snapshot.current!.article.html = `<p>Lazy figures follow.</p>
+<img class="lazy" src="data:image/gif;base64,R0lGODlhAQABAAAAACw=" data-src="/image?id=123&amp;format=webp" alt="Lazy URL" width="1" height="1">
+<img data-srcset="/image?id=small 320w, /image?id=large 960w" alt="Lazy set">`;
+  const ui = await client(t, snapshot);
+  const [url, set] = [...ui.$("article").querySelectorAll("img")];
+  assert.equal(url.getAttribute("src"), "https://example.com/image?id=123&format=webp");
+  assert.deepEqual([url.getAttribute("width"), url.getAttribute("height")], [null, null]);
+  assert.equal(set.getAttribute("src"), null);
+  assert.equal(set.getAttribute("srcset"),
+    "https://example.com/image?id=small 320w, https://example.com/image?id=large 960w");
+  assert.match(set.getAttribute("sizes")!, /680px/);
 });
 
 test("browser page restores an attached passage, explains it with Enter and clears it with Escape", async (t) => {

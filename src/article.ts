@@ -10,7 +10,10 @@ import TurndownService from "turndown";
 export interface Article {
   url: string;
   title: string;
+  /** What the model and the terminal read. Images appear only as their descriptions. */
   markdown: string;
+  /** The reader-view HTML of a web page, for the browser. Untrusted: it is sanitized where it is shown. */
+  html?: string;
   warning?: string;
 }
 
@@ -88,12 +91,23 @@ export async function resolveSource(value: string, cwd = process.cwd()): Promise
   return pathToFileURL(real).href;
 }
 
+/** Images cannot reach the model or the terminal. Keep descriptive alt text, not tracking URLs. */
+function describeImages(html: string, document: Document): string {
+  const holder = document.createElement("div");
+  holder.innerHTML = html;
+  holder.querySelectorAll("img").forEach((img) => {
+    img.replaceWith(document.createTextNode(img.alt ? `[Image: ${img.alt}]` : ""));
+  });
+  return holder.innerHTML;
+}
+
 export function extractArticle(html: string, url: string): Article {
   // No runScripts or resources option: scripts never execute, subresources never load.
   const dom = new JSDOM(html, { url, virtualConsole: new VirtualConsole() });
   try {
     const document = dom.window.document;
-    document.querySelectorAll("script,style,noscript,iframe,object,embed,svg,form,button,input,base").forEach((n) => n.remove());
+    // <noscript> stays for now: Readability recovers the images lazy-loading pages hide in it.
+    document.querySelectorAll("script,style,iframe,object,embed,svg,form,button,input,base").forEach((n) => n.remove());
     document.querySelectorAll("a").forEach((a) => {
       try {
         const target = new URL(a.getAttribute("href") ?? "", url);
@@ -103,18 +117,16 @@ export function extractArticle(html: string, url: string): Article {
         a.removeAttribute("href");
       }
     });
-    // Images cannot render in reader mode. Keep descriptive alt text, not tracking URLs.
-    document.querySelectorAll("img").forEach((img) => {
-      img.replaceWith(document.createTextNode(img.alt ? `[Image: ${img.alt}]` : ""));
-    });
     const parsed = new Readability(document.cloneNode(true) as Document, {
       charThreshold: 100,
       maxElemsToParse: 50_000,
     }).parse();
+    // Readability drops <noscript> itself; the fallback has no such pass.
+    document.querySelectorAll("noscript").forEach((n) => n.remove());
     const fallback = document.querySelector("article,main") ?? document.body;
-    const content = parsed?.content ?? fallback?.innerHTML ?? "";
+    const content = cleanText(parsed?.content ?? fallback?.innerHTML ?? "");
     const converter = new TurndownService({ headingStyle: "atx", codeBlockStyle: "fenced", bulletListMarker: "-" });
-    const markdown = cleanText(converter.turndown(content)).trim();
+    const markdown = cleanText(converter.turndown(describeImages(content, document))).trim();
     if (markdown.length < 40) {
       throw new Error("No readable article found. This page may require JavaScript, login, or a subscription.");
     }
@@ -122,6 +134,7 @@ export function extractArticle(html: string, url: string): Article {
       url,
       title: cleanText(parsed?.title || document.title || sourceLabel(url)).replace(/\s+/g, " ").trim(),
       markdown,
+      html: content,
       warning: parsed ? undefined : "Reader extraction was unavailable; showing simplified page content.",
     };
   } finally {

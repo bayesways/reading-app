@@ -18,7 +18,7 @@ export interface BrowserSnapshot {
   showingSummary: boolean;
   pages: Array<{ url: string; title: string }>;
   current?: {
-    article: { url: string; title: string; markdown: string; warning?: string };
+    article: { url: string; title: string; markdown: string; html?: string; warning?: string };
     exchanges: Array<{ question: string; answer: string; selection?: string }>;
     summary: string;
     selection?: string;
@@ -46,6 +46,7 @@ function snapshot(state: ReaderState, model: string): BrowserSnapshot {
       // Copied field by field on purpose: the reading model is internal, this payload is the page's API.
       article: {
         url: current.article.url, title: current.article.title, markdown: current.article.markdown,
+        ...(current.article.html ? { html: current.article.html } : {}),
         ...(current.article.warning ? { warning: current.article.warning } : {}),
       },
       exchanges: current.exchanges.map(({ question, answer, selection }) => ({
@@ -198,7 +199,7 @@ export class BrowserReader {
           "Content-Type": "text/html; charset=utf-8",
           "Content-Length": Buffer.byteLength(body),
           "Cache-Control": "no-store",
-          "Content-Security-Policy": `default-src 'none'; script-src 'nonce-${nonce}'; style-src 'nonce-${nonce}'; connect-src 'self'; img-src 'none'; font-src 'none'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'`,
+          "Content-Security-Policy": `default-src 'none'; script-src 'nonce-${nonce}'; style-src 'nonce-${nonce}'; connect-src 'self'; img-src https: http: data:; font-src 'none'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'`,
           "Referrer-Policy": "no-referrer",
           "X-Content-Type-Options": "nosniff",
           "X-Frame-Options": "DENY",
