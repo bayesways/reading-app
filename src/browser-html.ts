@@ -1,6 +1,6 @@
 // Renders the reader-view HTML Readability extracted, the way Firefox's Reader View
 // shows it: the page's own structure, figures and images, in the reader's styles.
-// It runs after the Markdown renderer and shares its link check, markdownUrl.
+// It shares the browser's URL policy with the Markdown renderer.
 const renderer = String.raw`
 const htmlTags = new Set(['p','br','hr','h1','h2','h3','h4','h5','h6','blockquote','pre','ul','ol','li','dl','dt','dd',
   'div','figure','figcaption','table','caption','thead','tbody','tfoot','tr','th','td',
@@ -16,7 +16,7 @@ const htmlDropped = new Set(['script','style','template','noscript','iframe','fr
 function imageUrl(value, sourceUrl) {
   if (!value) return null;
   if (/^data:image\/(?:png|gif|jpeg|webp|avif|svg\+xml)[;,]/i.test(value)) return value;
-  return markdownUrl(value, sourceUrl);
+  return safeUrl(value, sourceUrl);
 }
 
 // srcset candidates are a URL (which may itself contain commas) and an optional width or density.
@@ -103,7 +103,7 @@ function htmlImage(source, parent, sourceUrl) {
 
 function htmlElement(source, tag, sourceUrl) {
   if (tag === 'a') {
-    const href = markdownUrl(source.getAttribute('href'), sourceUrl);
+    const href = safeUrl(source.getAttribute('href'), sourceUrl);
     if (!href) return document.createElement('span');
     const link = document.createElement('a');
     link.href = href;
