@@ -2,6 +2,9 @@ import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
 import vm from "node:vm";
 import { JSDOM, VirtualConsole } from "jsdom";
+import { extractArticle } from "../src/article.ts";
+import { browserHtml } from "../src/browser-html.ts";
+import { browserMarkdown } from "../src/browser-markdown.ts";
 import { BrowserReader, parseReaderCommand, type BrowserSnapshot } from "../src/browser.ts";
 import { browserPage } from "../src/browser-page.ts";
 import { ReaderState } from "../src/reader.ts";
@@ -33,6 +36,12 @@ test("browser client is self-contained, syntactically valid and avoids HTML inje
   assert.doesNotMatch(page, /sourceMappingURL/);
   assert.doesNotMatch(page, /<script[^>]+src=|<link[^>]+href=|<img/i);
   assert.equal(source.match(/function safeUrl\b/g)?.length, 1); // Markdown and reader HTML share one URL policy.
+  // Each renderer can also be embedded independently without relying on a global
+  // that only browserClient happens to provide.
+  assert.equal(browserHtml().match(/function safeUrl\b/g)?.length, 1);
+  assert.equal(browserMarkdown().match(/function safeUrl\b/g)?.length, 1);
+  new vm.Script(browserHtml());
+  new vm.Script(browserMarkdown());
 });
 
 test("browser reader is loopback-only, capability protected and CSP restricted", async (t) => {
@@ -518,6 +527,17 @@ test("a question typed while the first snapshot is in flight belongs to the arti
   assert.equal((ui.$("question") as HTMLTextAreaElement).value, "");
 });
 
+test("a question submitted before the first snapshot is sent without crashing", async (t) => {
+  const ui = await client(t, fixture(), true);
+  ui.type("question", "Asked while connecting");
+  await ui.submit("askForm");
+  assert.deepEqual(ui.calls.at(-1), {
+    action: "ask", body: { question: "Asked while connecting", selection: "" },
+  });
+  ui.releaseFirst();
+  await ui.settle();
+});
+
 test("a snapshot that is already busy elsewhere still accepts a question", async (t) => {
   // Nothing re-polls state, so a busy flag from another tab or the TUI would
   // otherwise disable this composer for the life of the page.
@@ -537,6 +557,17 @@ test("an unknown command reports itself even while a question is in flight", asy
   await ui.submit("askForm");
   assert.match(ui.$("foot").textContent!, /Unknown command/);
   assert.equal(ui.calls.filter(({ action }) => action === "ask").length, 1);
+});
+
+test("IME confirmation does not submit a half-composed question", async (t) => {
+  const ui = await client(t);
+  ui.type("question", "未確定");
+  ui.$("question").dispatchEvent(new ui.window.KeyboardEvent("keydown", {
+    key: "Enter", isComposing: true, bubbles: true, cancelable: true,
+  }));
+  await ui.settle();
+  assert.equal(ui.calls.some(({ action }) => action === "ask"), false);
+  assert.equal((ui.$("question") as HTMLTextAreaElement).value, "未確定");
 });
 
 test("repeated submissions while busy do not replace the request or consume the next draft", async (t) => {
@@ -656,6 +687,20 @@ test("Markdown links with no target in the page stay plain text", async (t) => {
   assert.equal(article.querySelectorAll("a").length, 0); // Neither resolves against the source URL.
   assert.match(article.textContent!, /A footnote, a backref and an empty link/);
   assert.match(article.textContent!, /\[Image\]/); // An undescribed image is still marked, not a blank gap.
+});
+
+test("extracted fragments and named anchors stay plain text in the browser", async (t) => {
+  const prose = "Simulated annealing sometimes accepts worse moves while cooling, which helps it escape local optima. ";
+  const extracted = extractArticle(`<html><head><title>Annealing</title></head><body><article>
+<h1>Annealing</h1><p>${prose.repeat(4)}</p>
+<p><a href=" #cite_note-1 ">[1]</a> <a name="notes">Notes</a> <a href="/more">More</a></p>
+</article></body></html>`, "https://example.com/wiki/Annealing");
+  const snapshot = fixture();
+  snapshot.current!.article.content = { format: "html", text: extracted.html! };
+  const ui = await client(t, snapshot);
+  const rendered = ui.$("article");
+  assert.match(rendered.textContent!, /\[1\]\s+Notes\s+More/);
+  assert.deepEqual([...rendered.querySelectorAll("a")].map((link) => link.href), ["https://example.com/more"]);
 });
 
 test("reader-view HTML keeps figures, images and tables but nothing active", async (t) => {
@@ -1009,4 +1054,18 @@ test("text in a previous answer can be selected, explained and asked about like 
   ui.type("question", "Why does that follow?");
   await ui.submit("askForm");
   assert.deepEqual(ui.calls.at(-1), { action: "ask", body: { question: "Why does that follow?", selection: "Because." } });
+});
+
+test("a status-only render preserves a live selection in an answer", async (t) => {
+  const ui = await client(t);
+  const selection = ui.window.getSelection()!;
+  const range = ui.window.document.createRange();
+  range.selectNodeContents(ui.window.document.querySelector("#thread .a p")!);
+  selection.addRange(range);
+  assert.equal(selection.toString(), "Because.");
+
+  // Switching to the already-visible article still calls render, like the status timer does.
+  ui.type("question", "/article");
+  await ui.submit("askForm");
+  assert.equal(selection.toString(), "Because.");
 });

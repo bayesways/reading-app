@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
+import { browserUrl } from "./browser-url.ts";
 
 // Embed the installed browser build so the reader remains self-contained and
 // works under its nonce-only CSP without fetching scripts from a CDN. Reading it
@@ -93,6 +94,11 @@ function markdown(text, root, sourceUrl) {
 }
 `;
 
-export function browserMarkdown(): string {
+export function browserMarkdownRenderer(): string {
   return parserBundle() + renderer;
+}
+
+/** A standalone Markdown renderer, including the URL policy it depends on. */
+export function browserMarkdown(): string {
+  return browserUrl() + browserMarkdownRenderer();
 }

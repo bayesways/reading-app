@@ -1,3 +1,5 @@
+import { browserUrl } from "./browser-url.ts";
+
 // Renders the reader-view HTML Readability extracted, the way Firefox's Reader View
 // shows it: the page's own structure, figures and images, in the reader's styles.
 // It shares the browser's URL policy with the Markdown renderer.
@@ -160,6 +162,11 @@ function readerHtml(html, root, sourceUrl) {
 }
 `;
 
-export function browserHtml(): string {
+export function browserHtmlRenderer(): string {
   return renderer;
+}
+
+/** A standalone HTML renderer, including the URL policy it depends on. */
+export function browserHtml(): string {
+  return browserUrl() + browserHtmlRenderer();
 }

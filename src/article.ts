@@ -109,8 +109,21 @@ export function extractArticle(html: string, url: string): Article {
     // <noscript> stays for now: Readability recovers the images lazy-loading pages hide in it.
     document.querySelectorAll("script,style,iframe,object,embed,svg,form,button,input,base").forEach((n) => n.remove());
     document.querySelectorAll("a").forEach((a) => {
+      const raw = a.getAttribute("href");
+      if (raw === null) return;
+      const href = raw.trim();
+      if (!href) {
+        a.removeAttribute("href");
+        return;
+      }
+      // Reader output has no source-page anchors. Keep fragments recognizable so
+      // the browser renderer can turn them into text instead of external links.
+      if (href.startsWith("#")) {
+        a.setAttribute("href", href);
+        return;
+      }
       try {
-        const target = new URL(a.getAttribute("href") ?? "", url);
+        const target = new URL(href, url);
         if (!["http:", "https:"].includes(target.protocol)) throw new Error("Unsafe link");
         a.setAttribute("href", target.href);
       } catch {

@@ -59,6 +59,18 @@ test("extracts Markdown, resolves links, strips scripts and keeps image descript
   assert.doesNotMatch(article.html!, /<script|javascript:|readerExecuted/);
 });
 
+test("extraction preserves fragments and does not invent links for named anchors", () => {
+  const linked = `<html><head><title>Annealing notes</title></head><body><article>
+<h1>Annealing notes</h1><p>${paragraph}</p><p>${paragraph}</p>
+<p><a href=" #cite_note-1 ">[1]</a> <a name="section">Section target</a>
+<a href="/more">More reading</a></p></article></body></html>`;
+  const article = extractArticle(linked, "https://example.com/wiki/Annealing");
+  assert.match(article.html!, /href="#cite_note-1"/);
+  assert.doesNotMatch(article.html!, /<a[^>]+href="https:\/\/example\.com\/wiki\/Annealing"[^>]*>Section target/);
+  assert.doesNotMatch(article.markdown, /\[Section target\]\(https:\/\/example\.com\/wiki\/Annealing\)/);
+  assert.match(article.html!, /href="https:\/\/example\.com\/more"/);
+});
+
 test("images hidden from scripts are recovered for the browser but described to the model", () => {
   const lazy = `<html><head><title>Lazy figures</title></head><body><article><p>${paragraph}</p>
 <figure><img src="data:image/gif;base64,R0lGODlhAQABAAAAACw=" data-src="/figures/prior.png" alt="Prior density"><figcaption>The prior.</figcaption></figure>

@@ -1,5 +1,5 @@
-import { browserHtml } from "./browser-html.ts";
-import { browserMarkdown } from "./browser-markdown.ts";
+import { browserHtmlRenderer } from "./browser-html.ts";
+import { browserMarkdownRenderer } from "./browser-markdown.ts";
 import { browserUrl } from "./browser-url.ts";
 
 const client = String.raw`
@@ -10,7 +10,7 @@ const $=id=>document.getElementById(id); let state; let selected=''; let mode='a
 let busyId=0; let cancelled=0;
 // What the article pane shows. Rebuilding it reloads its images and drops a live selection,
 // so it is redrawn only when this changes.
-let shownView=null;
+let shownView=null; let shownExchanges=null; let shownPending=null;
 function caretPoint(control,position){
   const style=getComputedStyle(control);const mirror=document.createElement('div');const marker=document.createElement('span');
   mirror.setAttribute('aria-hidden','true');
@@ -69,18 +69,20 @@ const shown=loading?.url||(current?current.article.url:'');
 if(shown&&document.activeElement!==$('url'))$('url').value=shown;
 const list=$('pages');list.replaceChildren();for(const page of state.pages){const option=document.createElement('option');option.value=page.url;option.label=page.title;list.append(option)}
 const view=current
-  ? JSON.stringify([mode,current.article.url,current.article.title,current.article.warning,current.article.content.format,mode==='summary'?current.summary:current.article.content.text])
-  : JSON.stringify([state.busy||state.error||flash?state.status:'']);
-if(view!==shownView){shownView=view;const body=$('article');body.replaceChildren();
+  ? {mode,url:current.article.url,title:current.article.title,warning:current.article.warning,format:current.article.content.format,text:mode==='summary'?current.summary:current.article.content.text}
+  : {mode:'empty',url:'',title:'',warning:'',format:'',text:state.busy||state.error||flash?state.status:''};
+const viewChanged=!shownView||Object.keys(view).some(key=>view[key]!==shownView[key]);
+if(viewChanged){shownView=view;const body=$('article');body.replaceChildren();
 if(current){const h1=document.createElement('h1');h1.textContent=current.article.title;body.append(h1);
 if(mode==='summary'){body.append(note('recap · type /article to return to the page','recap'));const recap=document.createElement('div');markdown(current.summary||'*No recap yet. Type /recap to make one.*',recap,current.article.url);body.append(recap)}
 else{if(current.article.warning)body.append(note(current.article.warning));const text=document.createElement('div');const content=current.article.content;
 if(content.format==='html')readerHtml(content.text,text,current.article.url);else markdown(withoutTitle(content.text,current.article.title),text,current.article.url);body.append(text)}}
 else if(state.busy||state.error||flash)body.append(note(state.status))}
-const thread=$('thread');thread.replaceChildren();const exchanges=current?current.exchanges:[];
+const thread=$('thread');const exchanges=current?current.exchanges:[];
+if(exchanges!==shownExchanges||pending!==shownPending){shownExchanges=exchanges;shownPending=pending;thread.replaceChildren();
 exchanges.forEach((item,index)=>thread.append(exchange(index+1,item.question,item.selection,item.answer,current?.article.url)));
 if(pending)thread.append(exchange(exchanges.length+1,pending.question,pending.selection,''));
-thread.hidden=!thread.childElementCount;
+thread.hidden=!thread.childElementCount}
 // A passage attached in an earlier tab is still attached here: show it rather than hide the state.
 if(current&&current.selection&&!selected)selected=current.selection;showQuote();
 $('foot').textContent=footer();$('foot').className='foot'+(state.error?' error':'')+(state.busy?' busy':'');dockSpace()}
@@ -93,7 +95,7 @@ function dockSpace(){document.body.style.paddingBottom=($('dock').hidden?0:$('do
 // any letter still starts a question.
 async function refresh(){state=await api('state');render();if(!state.current)$('url').focus()}
 async function run(action,payload,item){const id=++requestId;busyId=id;pending=item||null;
-try{state={...state,busy:true,error:false,status:action==='summary'?'Summarizing your reading and discussion… Esc cancels.':action==='load'?'Loading source… Esc cancels.':'Asking your pi model… Esc cancels.'};render();if(item)toBottom();
+try{state={pages:[],...state,busy:true,error:false,status:action==='summary'?'Summarizing your reading and discussion… Esc cancels.':action==='load'?'Loading source… Esc cancels.':'Asking your pi model… Esc cancels.'};render();if(item)toBottom();
 const result=await api(action,payload);
 if(id===requestId){pending=null;state=result;selected=state.current?.selection||'';render();flashStatus();if(item)toBottom()}
 // Loading another page supersedes a request the server still finished; only Escape undoes it.
@@ -102,7 +104,7 @@ catch(error){if(id===requestId){pending=null;fail(error)}return false}
 finally{if(busyId===id)busyId=0}}
 async function explain(){if(busyId)return;holdSelection();if(!selected)return;await run('explain',{selection:selected},{question:'Explain this passage.',selection:selected})}
 async function escape(){if(state?.busy||busyId){cancelled=requestId;requestId++;busyId=0;pending=null;loading=null;state=await api('cancel',{});flashStatus();render();return}
-if(selected){const quote=selected;selected='';$('hint').hidden=true;getSelection()?.removeAllRanges();state=await api('select',{selection:''});render();revealQuote(quote);return}
+if(selected){const quote=selected;const source=quoteSource;selected='';$('hint').hidden=true;getSelection()?.removeAllRanges();state=await api('select',{selection:''});render();revealQuote(quote,source);quoteSource='article';return}
 if(mode==='summary'){mode='article';render()}}
 // run('load') restores the selection from the snapshot it returns, so nothing is cleared here.
 function loadArticle(url){
@@ -132,13 +134,13 @@ $('askForm').addEventListener('submit',event=>{event.preventDefault();const valu
 const command=value.toLowerCase();
 if(command==='/article'||command==='/read'){$('question').value='';saveDraft();grow();mode='article';render();return}
 if(command==='/recap'||command==='/summary'||command==='/summarize'){if(busyId)return;$('question').value='';saveDraft();grow();mode='summary';run('summary',{});return}
-if(command.charAt(0)==='/'){state={...state,error:true,status:'Unknown command. Type /recap for a recap, /article to return to the page.'};flashStatus();render();return}
+if(command.charAt(0)==='/'){state={pages:[],...state,error:true,status:'Unknown command. Type /recap for a recap, /article to return to the page.'};flashStatus();render();return}
 if(busyId)return;
 const url=draftUrl;
 const submitted=saveDraft();
 run('ask',{question:value,selection:selected},{question:value,selection:selected}).then(sent=>{if(sent)clearSubmittedDraft(url,submitted)})});
 $('question').addEventListener('input',()=>{saveDraft();grow()});
-$('question').addEventListener('keydown',event=>{if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();$('askForm').requestSubmit()}});
+$('question').addEventListener('keydown',event=>{if(event.key==='Enter'&&!event.shiftKey&&!event.isComposing){event.preventDefault();$('askForm').requestSubmit()}});
 for(const control of [$('url'),$('question')]){for(const event of ['focus','click','keyup','select','scroll'])control.addEventListener(event,()=>placeFieldCursor(control));control.addEventListener('blur',()=>placeFieldCursor(control))}
 // Answers read like the source: a passage within one answer can be explained or asked about too.
 function readable(node){
@@ -163,7 +165,8 @@ function holdSelection(){
   const text=selectionText();
   if(!text)return false;
   selected=text;
-  quoteAt=quoteOffset(current.range);
+  quoteSource=$('article').contains(current.range.commonAncestorContainer)?'article':'thread';
+  quoteAt=quoteSource==='article'?quoteOffset(current.range):-1;
   showQuote();
   return true;
 }
@@ -173,7 +176,7 @@ function captureSelection(){
 // The article is rebuilt whenever it changes, so a quote is found again by its text rather than
 // a held Range. Whitespace is dropped on both sides: a selection's line breaks between
 // paragraphs are not in the text nodes.
-let quoteAt=-1;
+let quoteAt=-1; let quoteSource='article';
 function squash(text){return text.replace(/\s+/g,'')}
 function quoteOffset(range){
   const before=document.createRange();
@@ -184,9 +187,9 @@ function quoteOffset(range){
 // After Escape clears a quote, scroll back to its passage unless it is already in view. Where
 // it was selected wins over an earlier repeat of the same words; a quote restored from another
 // tab has no such position and falls back to the first match.
-function revealQuote(quote){
+function revealQuote(quote,source){
   const needle=squash(quote);
-  if(mode!=='article'||!needle)return;
+  if(source!=='article'||mode!=='article'||!needle)return;
   const walker=document.createTreeWalker($('article'),NodeFilter.SHOW_TEXT);
   const nodes=[];
   let flat='';
@@ -225,7 +228,7 @@ $('hint').addEventListener('mousedown',event=>event.preventDefault());
 $('hint').addEventListener('click',()=>{explain().catch(fail)});
 document.addEventListener('selectionchange',()=>{placeHint();const active=document.activeElement;if(active===$('url')||active===$('question'))placeFieldCursor(active)});addEventListener('scroll',placeHint,{passive:true});addEventListener('resize',()=>{placeHint();dockSpace();placeFieldCursor($('url'));placeFieldCursor($('question'))});
 // Apart from the hint, every action is a keystroke: enter explains a selection, esc unwinds, any letter starts a question.
-addEventListener('keydown',event=>{const typing=event.target===$('question')||event.target===$('url');
+addEventListener('keydown',event=>{if(event.isComposing)return;const typing=event.target===$('question')||event.target===$('url');
 if(event.key==='Escape'){event.preventDefault();escape().catch(fail);return}
 if(typing||event.metaKey||event.ctrlKey||event.altKey)return;
 if(event.key==='Enter'){if(selected){event.preventDefault();explain().catch(fail)}return}
@@ -234,6 +237,8 @@ dockSpace();
 refresh().catch(fail);
 `;
 
+let bundle = "";
 export function browserClient(): string {
-  return browserUrl() + browserMarkdown() + browserHtml() + client;
+  if (!bundle) bundle = browserUrl() + browserMarkdownRenderer() + browserHtmlRenderer() + client;
+  return bundle;
 }
